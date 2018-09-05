@@ -1,10 +1,7 @@
-/* -*- Mode: C; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /*
     Gpredict: Real-time satellite tracking and orbit prediction program
 
-    Copyright (C)  2001-2013  Alexandru Csete, OZ9AEC.
-
-    Authors: Alexandru Csete <oz9aec@gmail.com>
+    Copyright (C)  2001-2017  Alexandru Csete, OZ9AEC.
 
     Comments, questions and bugreports should be submitted via
     http://sourceforge.net/projects/gpredict/
@@ -28,13 +25,14 @@
 #ifndef __GTK_POLAR_PLOT_H__
 #define __GTK_POLAR_PLOT_H__ 1
 
+#include <gdk/gdk.h>
 #include <glib.h>
 #include <glib/gi18n.h>
-#include <gdk/gdk.h>
+#include <goocanvas.h>
 #include <gtk/gtk.h>
+
 #include "gtk-sat-data.h"
 #include "predict-tools.h"
-#include <goocanvas.h>
 
 /* *INDENT-OFF* */
 #ifdef __cplusplus
@@ -42,9 +40,8 @@ extern "C" {
 #endif /* __cplusplus */
 /* *INDENT-ON* */
 
-    /** \brief Number of time ticks. */
+/** \brief Number of time ticks. */
 #define TRACK_TICK_NUM 5
-
 
 #define GTK_POLAR_PLOT(obj)          G_TYPE_CHECK_INSTANCE_CAST (obj, gtk_polar_plot_get_type (), GtkPolarPlot)
 #define GTK_POLAR_PLOT_CLASS(klass)  G_TYPE_CHECK_CLASS_CAST (klass, gtk_polar_plot_get_type (), GtkPolarPlotClass)
@@ -55,9 +52,8 @@ extern "C" {
 typedef struct _GtkPolarPlot GtkPolarPlot;
 typedef struct _GtkPolarPlotClass GtkPolarPlotClass;
 
-
-    /* graph orientation; start at 12
-       o'clock and go clockwise */
+/* graph orientation; start at 12
+   o'clock and go clockwise */
 typedef enum {
     POLAR_PLOT_NESW = 0,        /*!< Normal / usual */
     POLAR_PLOT_NWSE = 1,
@@ -65,8 +61,7 @@ typedef enum {
     POLAR_PLOT_SWNE = 3
 } polar_plot_swap_t;
 
-
-    /* pole identifier */
+/* pole identifier */
 typedef enum {
     POLAR_PLOT_POLE_N = 0,
     POLAR_PLOT_POLE_E = 1,
@@ -74,9 +69,8 @@ typedef enum {
     POLAR_PLOT_POLE_W = 3
 } polar_plot_pole_t;
 
-
 struct _GtkPolarPlot {
-    GtkVBox         vbox;
+    GtkBox          box;
 
     GtkWidget      *canvas;     /*!< The canvas widget */
 
@@ -87,6 +81,7 @@ struct _GtkPolarPlot {
     GooCanvasItemModel *curs;   /*!< cursor tracking text */
 
     pass_t         *pass;
+    GooCanvasItemModel *bgd;    /*!< Background */
     GooCanvasItemModel *track;  /*!< Sky track. */
     GooCanvasItemModel *target; /*!< Target object marker */
     GooCanvasItemModel *ctrl;   /*!< Position marker for the controller */
@@ -94,7 +89,6 @@ struct _GtkPolarPlot {
     GooCanvasItemModel *trtick[TRACK_TICK_NUM]; /*!< Time ticks along the sky track */
 
     qth_t          *qth;        /*!< Pointer to current location. */
-
 
     guint           cx;         /*!< center X */
     guint           cy;         /*!< center Y */
@@ -110,15 +104,11 @@ struct _GtkPolarPlot {
 };
 
 struct _GtkPolarPlotClass {
-    GtkVBoxClass    parent_class;
+    GtkBoxClass     parent_class;
 };
 
-
-
 GType           gtk_polar_plot_get_type(void);
-
 GtkWidget      *gtk_polar_plot_new(qth_t * qth, pass_t * pass);
-
 void            gtk_polar_plot_set_pass(GtkPolarPlot * plot, pass_t * pass);
 void            gtk_polar_plot_set_target_pos(GtkPolarPlot * plot, gdouble az,
                                               gdouble el);

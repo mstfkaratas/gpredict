@@ -1,19 +1,9 @@
 /*
   Gpredict: Real-time satellite tracking and orbit prediction program
 
-  Copyright (C)  2001-2013  Alexandru Csete, OZ9AEC.
+  Copyright (C)  2001-2017  Alexandru Csete, OZ9AEC.
   Copyright (C)  2006-2007  William J Beksi, KC2EXL.
   Copyright (C)  2013       Charles Suprin,  AA1VS.
-
-  Authors: Alexandru Csete <oz9aec@gmail.com>
-  William J Beksi <wjbeksi@users.sourceforge.net>
-  Charles Suprin <hamaa1vs@gmail.com>
-
-  Comments, questions and bugreports should be submitted via
-  http://sourceforge.net/projects/gpredict/
-  More details can be found at the project home page:
-
-  http://gpredict.oz9aec.net/
  
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -28,18 +18,6 @@
   You should have received a copy of the GNU General Public License
   along with this program; if not, visit http://www.fsf.org/
 */
-
-/**
- * \brief Satellite Map Widget.
- *
- * The satellite map widget is responsible for plotting and updating information
- * relevent to each satellite. This information includes the satellite position,
- * label, and footprint. Satellites are stored in a hash table by their catalog 
- * number. The satellite map widget is also responsible for loading and resizing
- * the map.
- *
- */
-
 #ifdef HAVE_CONFIG_H
 #include <build-config.h>
 #endif
@@ -63,7 +41,6 @@
 #include "orbit-tools.h"
 #include "predict-tools.h"
 #include "sat-cfg.h"
-#include "sat-debugger.h"
 #include "sat-info.h"
 #include "sat-log.h"
 #include "sgpsdp/sgp4sdp4.h"
@@ -71,9 +48,12 @@
 
 #define MARKER_SIZE_HALF    1
 
+/* Update terminator every 30 seconds */
+#define TERMINATOR_UPDATE_INTERVAL (15.0/86400.0)
+
 static void     gtk_sat_map_class_init(GtkSatMapClass * class);
 static void     gtk_sat_map_init(GtkSatMap * polview);
-static void     gtk_sat_map_destroy(GtkObject * object);
+static void     gtk_sat_map_destroy(GtkWidget * widget);
 static void     size_allocate_cb(GtkWidget * widget,
                                  GtkAllocation * allocation, gpointer data);
 static void     update_map_size(GtkSatMap * satmap);
@@ -131,7 +111,6 @@ static GooCanvasPoints *points1;
 static GooCanvasPoints *points2;
 
 
-/** Register the satellite map widget. */
 GType gtk_sat_map_get_type()
 {
     static GType    gtk_sat_map_type = 0;
@@ -151,7 +130,7 @@ GType gtk_sat_map_get_type()
             NULL
         };
 
-        gtk_sat_map_type = g_type_register_static(GTK_TYPE_VBOX,
+        gtk_sat_map_type = g_type_register_static(GTK_TYPE_BOX,
                                                   "GtkSatMap",
                                                   &gtk_sat_map_info, 0);
     }
@@ -159,38 +138,24 @@ GType gtk_sat_map_get_type()
     return gtk_sat_map_type;
 }
 
-
-/** \brief Initialize a GtkSatMapClass object. */
 static void gtk_sat_map_class_init(GtkSatMapClass * class)
 {
-    /*GObjectClass      *gobject_class; */
-    GtkObjectClass *object_class;
+    GtkWidgetClass *widget_class;
 
-    /*GtkWidgetClass    *widget_class; */
-    /*GtkContainerClass *container_class; */
-
-    /*gobject_class   = G_OBJECT_CLASS (class); */
-    object_class = (GtkObjectClass *) class;
-    /*widget_class    = (GtkWidgetClass*) class; */
-    /*container_class = (GtkContainerClass*) class; */
-
+    widget_class = (GtkWidgetClass *) class;
+    widget_class->destroy = gtk_sat_map_destroy;
     parent_class = g_type_class_peek_parent(class);
-
-    object_class->destroy = gtk_sat_map_destroy;
-    /* widget_class->size_allocate = gtk_sat_map_size_allocate; */
 }
 
-
-/** \brief Initialize a newly created GtkSatMap widget. */
 static void gtk_sat_map_init(GtkSatMap * satmap)
 {
     satmap->sats = NULL;
     satmap->qth = NULL;
     satmap->obj = NULL;
-    satmap->showtracks =
-        g_hash_table_new_full(g_int_hash, g_int_equal, NULL, NULL);
-    satmap->hidecovs =
-        g_hash_table_new_full(g_int_hash, g_int_equal, NULL, NULL);
+    satmap->showtracks = g_hash_table_new_full(g_int_hash, g_int_equal,
+                                               NULL, NULL);
+    satmap->hidecovs = g_hash_table_new_full(g_int_hash, g_int_equal,
+                                             NULL, NULL);
     satmap->naos = 0.0;
     satmap->ncat = 0;
     satmap->tstamp = 2458849.5;
@@ -200,6 +165,7 @@ static void gtk_sat_map_init(GtkSatMap * satmap)
     satmap->height = 0;
     satmap->refresh = 0;
     satmap->counter = 0;
+    satmap->show_terminator = FALSE;
     satmap->qthinfo = FALSE;
     satmap->eventinfo = FALSE;
     satmap->cursinfo = FALSE;
@@ -208,24 +174,13 @@ static void gtk_sat_map_init(GtkSatMap * satmap)
     satmap->resize = FALSE;
 }
 
-
-/** \brief Destroy a GtkSatMap widget. */
-static void gtk_sat_map_destroy(GtkObject * object)
+static void gtk_sat_map_destroy(GtkWidget * widget)
 {
-    gtk_sat_map_store_showtracks(GTK_SAT_MAP(object));
-
-    gtk_sat_map_store_hidecovs(GTK_SAT_MAP(object));
-
-    (*GTK_OBJECT_CLASS(parent_class)->destroy) (object);
+    gtk_sat_map_store_showtracks(GTK_SAT_MAP(widget));
+    gtk_sat_map_store_hidecovs(GTK_SAT_MAP(widget));
+    (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-
-/** \brief Initialize and plot each satellite on a canvas model. 
- *  
- *  This function creates a canvas model and loads the background map
- *  onto the canvas. Each satellite is then plotted on the map.
- *
- */
 GtkWidget      *gtk_sat_map_new(GKeyFile * cfgdata, GHashTable * sats,
                                 qth_t * qth)
 {
@@ -241,7 +196,6 @@ GtkWidget      *gtk_sat_map_new(GKeyFile * cfgdata, GHashTable * sats,
 
     satmap->obj = g_hash_table_new_full(g_int_hash, g_int_equal, g_free, NULL);
 
-    /* get settings */
     satmap->refresh = mod_cfg_get_int(cfgdata,
                                       MOD_CFG_MAP_SECTION,
                                       MOD_CFG_MAP_REFRESH,
@@ -279,18 +233,15 @@ GtkWidget      *gtk_sat_map_new(GKeyFile * cfgdata, GHashTable * sats,
 
     satmap->infobgd = rgba2html(col);
 
-    /* create the canvas */
     satmap->canvas = goo_canvas_new();
     g_object_set(G_OBJECT(satmap->canvas), "has-tooltip", TRUE, NULL);
 
-    /* safely load a background map */
     float           clon = (float)mod_cfg_get_int(cfgdata,
                                                   MOD_CFG_MAP_SECTION,
                                                   MOD_CFG_MAP_CENTER,
                                                   SAT_CFG_INT_MAP_CENTER);
 
     load_map_file(satmap, clon);
-
 
     /* Initial size request should be based on map size
        but if we do this we can not shrink the canvas below this size
@@ -305,8 +256,6 @@ GtkWidget      *gtk_sat_map_new(GKeyFile * cfgdata, GHashTable * sats,
                           gdk_pixbuf_get_width(satmap->origmap),
                           gdk_pixbuf_get_height(satmap->origmap));
 
-
-    /* connect size-request signal */
     g_signal_connect(satmap->canvas, "size-allocate",
                      G_CALLBACK(size_allocate_cb), satmap);
     g_signal_connect(satmap->canvas, "item_created",
@@ -316,34 +265,19 @@ GtkWidget      *gtk_sat_map_new(GKeyFile * cfgdata, GHashTable * sats,
 
     gtk_widget_show(satmap->canvas);
 
-    /* create the canvas model */
     root = create_canvas_model(satmap);
     goo_canvas_set_root_item_model(GOO_CANVAS(satmap->canvas), root);
-
     g_object_unref(root);
 
-    /* load the satellites we want to show tracks for */
     gtk_sat_map_load_showtracks(satmap);
-    /* load the satellites we want to show tracks for */
     gtk_sat_map_load_hide_coverages(satmap);
-
-    /* plot each sat on the canvas */
     g_hash_table_foreach(satmap->sats, plot_sat, satmap);
 
-    /* gtk_box_pack_start (GTK_BOX (satmap), satmap->swin, TRUE, TRUE, 0); */
-    gtk_container_add(GTK_CONTAINER(satmap), satmap->canvas);
+    gtk_box_pack_start(GTK_BOX(satmap), satmap->canvas, TRUE, TRUE, 0);
 
     return GTK_WIDGET(satmap);
 }
 
-
-/** \brief Create the map items on the canvas. 
- *  
- *  This function intializes the map dimensions and sets up the cursor track. 
- *  It creates and sets all of the static map items (QTH, grid lines, etc.)
- *  on the canvas.
- *
- */
 static GooCanvasItemModel *create_canvas_model(GtkSatMap * satmap)
 {
     GooCanvasItemModel *root;
@@ -365,20 +299,16 @@ static GooCanvasItemModel *create_canvas_model(GtkSatMap * satmap)
                                              satmap->x0, satmap->y0, NULL);
 
     goo_canvas_item_model_lower(satmap->map, NULL);
-
-    /* grid lines */
     draw_grid_lines(satmap, root);
 
-    /* Solar terminator. */
-    draw_terminator(satmap, root);
+    if (satmap->show_terminator)
+        draw_terminator(satmap, root);
 
     /* QTH mark */
     col = mod_cfg_get_int(satmap->cfgdata,
                           MOD_CFG_MAP_SECTION,
                           MOD_CFG_MAP_QTH_COL, SAT_CFG_INT_MAP_QTH_COL);
-
     lonlat_to_xy(satmap, satmap->qth->lon, satmap->qth->lat, &x, &y);
-
     satmap->qthmark = goo_canvas_rect_model_new(root,
                                                 x - MARKER_SIZE_HALF,
                                                 y - MARKER_SIZE_HALF,
@@ -387,10 +317,9 @@ static GooCanvasItemModel *create_canvas_model(GtkSatMap * satmap)
                                                 "fill-color-rgba", col,
                                                 "stroke-color-rgba", col,
                                                 NULL);
-
     satmap->qthlabel = goo_canvas_text_model_new(root, satmap->qth->name,
                                                  x, y + 2, -1,
-                                                 GTK_ANCHOR_NORTH,
+                                                 GOO_CANVAS_ANCHOR_NORTH,
                                                  "font", "Sans 8",
                                                  "fill-color-rgba", col, NULL);
 
@@ -401,7 +330,8 @@ static GooCanvasItemModel *create_canvas_model(GtkSatMap * satmap)
 
     satmap->locnam = goo_canvas_text_model_new(root, "",
                                                satmap->x0 + 2, satmap->y0 + 1,
-                                               -1, GTK_ANCHOR_NORTH_WEST,
+                                               -1,
+                                               GOO_CANVAS_ANCHOR_NORTH_WEST,
                                                "font", "Sans 8",
                                                "fill-color-rgba", col,
                                                "use-markup", TRUE, NULL);
@@ -428,7 +358,7 @@ static GooCanvasItemModel *create_canvas_model(GtkSatMap * satmap)
     satmap->next = goo_canvas_text_model_new(root, "",
                                              satmap->x0 + satmap->width - 2,
                                              satmap->y0 + 1, -1,
-                                             GTK_ANCHOR_NORTH_EAST,
+                                             GOO_CANVAS_ANCHOR_NORTH_EAST,
                                              "font", "Sans 8",
                                              "fill-color-rgba", col,
                                              "use-markup", TRUE, NULL);
@@ -447,7 +377,7 @@ static GooCanvasItemModel *create_canvas_model(GtkSatMap * satmap)
                                              satmap->x0 + 2,
                                              satmap->y0 + satmap->height - 1,
                                              -1,
-                                             GTK_ANCHOR_SOUTH_WEST,
+                                             GOO_CANVAS_ANCHOR_SOUTH_WEST,
                                              "font", "Sans 8",
                                              "fill-color-rgba", col,
                                              "use-markup", TRUE, NULL);
@@ -457,7 +387,7 @@ static GooCanvasItemModel *create_canvas_model(GtkSatMap * satmap)
                                             satmap->x0 + satmap->width - 2,
                                             satmap->y0 + satmap->height - 1,
                                             -1,
-                                            GTK_ANCHOR_SOUTH_EAST,
+                                            GOO_CANVAS_ANCHOR_SOUTH_EAST,
                                             "font", "Sans 8",
                                             "fill-color-rgba", col,
                                             "use-markup", TRUE, NULL);
@@ -465,45 +395,14 @@ static GooCanvasItemModel *create_canvas_model(GtkSatMap * satmap)
     return root;
 }
 
-
-/** \brief Manage new size allocation.
- *
- * This function is called when the canvas receives a new size allocation,
- * e.g. when the container is re-sized. The function sets the resize flag of
- * the GtkSatMap widget to TRUE to indicate that the map sizes should be
- * recalculated during the next timeout cycle.
- *
- * \note We could also do the calculation here, but that can be very CPU
- *       intensive because repetitive size allocation will also occur while
- *       the user resizes the window or the GtkPaned layout containers.
- */
-static void
-size_allocate_cb(GtkWidget * widget, GtkAllocation * allocation, gpointer data)
+static void size_allocate_cb(GtkWidget * widget, GtkAllocation * allocation,
+                             gpointer data)
 {
-    (void)widget;               /* avoid unusued parameter compiler warning */
-    (void)allocation;           /* avoid unusued parameter compiler warning */
+    (void)widget;
+    (void)allocation;
     GTK_SAT_MAP(data)->resize = TRUE;
 }
 
-
-/** \brief Update map size.
- *  \param widget Pointer to a GtkSatMap widget.
- *
- * This function is used to recalculate the GtkSatMap dimensions based on
- * its size allocations. It is normally called by the cyclic timeout handler
- * when the satmap->resize flag is set to TRUE.
- *
- * If the aspect ratio of the map is to be kept, we must use the following
- * algorithm to calculate the map dimensions:
- *
- *   ratio = origmap.w / origmap.h
- *   size = min (alloc.w, ratio*alloc.h)
- *   map.w = size
- *   map.h = size / ratio
- *
- * otherwise we can simply calculate using allocation->width and height.
- *
- */
 static void update_map_size(GtkSatMap * satmap)
 {
     GtkAllocation   allocation;
@@ -565,71 +464,51 @@ static void update_map_size(GtkSatMap * satmap)
                      "y", (gdouble) satmap->y0, NULL);
         g_object_unref(pbuf);
 
-        /* grid lines */
         redraw_grid_lines(satmap);
 
-        /* Solar terminator. */
-        redraw_terminator(satmap);
+        if (satmap->show_terminator)
+            redraw_terminator(satmap);
 
-        /* QTH */
         lonlat_to_xy(satmap, satmap->qth->lon, satmap->qth->lat, &x, &y);
         g_object_set(satmap->qthmark,
                      "x", x - MARKER_SIZE_HALF,
                      "y", y - MARKER_SIZE_HALF, NULL);
         g_object_set(satmap->qthlabel, "x", x, "y", y + 2, NULL);
 
-        /* QTH info */
         g_object_set(satmap->locnam,
                      "x", (gdouble) satmap->x0 + 2,
                      "y", (gdouble) satmap->y0 + 1, NULL);
 
-        /* next event */
         g_object_set(satmap->next,
                      "x", (gdouble) satmap->x0 + satmap->width - 2,
                      "y", (gdouble) satmap->y0 + 1, NULL);
 
-        /* cursor info */
         g_object_set(satmap->curs,
                      "x", (gdouble) satmap->x0 + 2,
                      "y", (gdouble) satmap->y0 + satmap->height - 1, NULL);
 
-        /* selected sat info */
         g_object_set(satmap->sel,
                      "x", (gdouble) satmap->x0 + satmap->width - 2,
                      "y", (gdouble) satmap->y0 + satmap->height - 1, NULL);
 
-
-        /* update satellites */
         g_hash_table_foreach(satmap->sats, update_sat, satmap);
-
         satmap->resize = FALSE;
     }
 }
 
-
-/** \brief Manage canvas realize signals.
- *
- * The function is used to re-order the canvas items (they can not be
- * re-ordered at creation, since the canvas is not visible).
- */
 static void on_canvas_realized(GtkWidget * canvas, gpointer data)
 {
     GtkSatMap      *satmap = GTK_SAT_MAP(data);
 
-    (void)canvas;               /* avoid unusued parameter compiler warning */
+    (void)canvas;
 
-    /* raise info items */
     goo_canvas_item_model_raise(satmap->sel, NULL);
     goo_canvas_item_model_raise(satmap->locnam, NULL);
     goo_canvas_item_model_raise(satmap->next, NULL);
     goo_canvas_item_model_raise(satmap->curs, NULL);
 }
 
-
-/** \brief Update the GtkSatMap widget
- *
- * Called periodically from GtkSatModule.
- */
+/* Update the GtkSatMap widget. Called periodically from GtkSatModule. */
 void gtk_sat_map_update(GtkWidget * widget)
 {
     GtkSatMap      *satmap = GTK_SAT_MAP(widget);
@@ -642,26 +521,21 @@ void gtk_sat_map_update(GtkWidget * widget)
     gfloat          x, y;
     gdouble         oldx, oldy;
 
-
     /* check whether there are any pending resize requests */
     if (satmap->resize)
         update_map_size(satmap);
 
-    /* check if qth has moved significantly if so move it */
+    /* check if qth has moved significantly, if so move it */
     lonlat_to_xy(satmap, satmap->qth->lon, satmap->qth->lat, &x, &y);
     g_object_get(satmap->qthmark, "x", &oldx, "y", &oldy, NULL);
 
     if ((fabs(oldx - x) >= 2 * MARKER_SIZE_HALF) ||
         (fabs(oldy - y) >= 2 * MARKER_SIZE_HALF))
     {
-
-        /* update qth mark */
         g_object_set(satmap->qthmark,
                      "x", x - MARKER_SIZE_HALF,
                      "y", y - MARKER_SIZE_HALF, NULL);
         g_object_set(satmap->qthlabel, "x", x, "y", y + 2, NULL);
-
-        /* QTH info */
         g_object_set(satmap->locnam,
                      "x", (gdouble) satmap->x0 + 2,
                      "y", (gdouble) satmap->y0 + 1, NULL);
@@ -681,38 +555,30 @@ void gtk_sat_map_update(GtkWidget * widget)
         satmap->naos = 0.0;
         satmap->ncat = 0;
 
-        /* QTH */
-        /*update for accuracy */
         lonlat_to_xy(satmap, satmap->qth->lon, satmap->qth->lat, &x, &y);
         g_object_set(satmap->qthmark,
                      "x", x - MARKER_SIZE_HALF,
                      "y", y - MARKER_SIZE_HALF, NULL);
         g_object_set(satmap->qthlabel, "x", x, "y", y + 2, NULL);
-
-        /* QTH info */
         g_object_set(satmap->locnam,
                      "x", (gdouble) satmap->x0 + 2,
                      "y", (gdouble) satmap->y0 + 1, NULL);
 
-
-        /* update sats */
         g_hash_table_foreach(satmap->sats, update_sat, satmap);
 
-        /* Update the Solar Terminator, only once in a hundred satellite
-           updates. */
-        if (++satmap->terminator_time_out >= 100)
+        /* Update the Solar Terminator if necessary */
+        if (satmap->show_terminator &&
+            fabs(satmap->tstamp - satmap->terminator_last_tstamp) >
+            TERMINATOR_UPDATE_INTERVAL)
         {
+            satmap->terminator_last_tstamp = satmap->tstamp;
             redraw_terminator(satmap);
-            satmap->terminator_time_out = 0;
         }
 
-        /* update countdown to NEXT AOS label */
         if (satmap->eventinfo)
         {
-
             if (satmap->ncat > 0)
             {
-
                 catnr = g_try_new0(gint, 1);
                 *catnr = satmap->ncat;
                 sat = SAT(g_hash_table_lookup(satmap->sats, catnr));
@@ -721,7 +587,6 @@ void gtk_sat_map_update(GtkWidget * widget)
                 /* last desperate sanity check */
                 if (sat != NULL)
                 {
-
                     now = satmap->tstamp;       //get_current_daynum ();
                     number = satmap->naos - now;
 
@@ -798,18 +663,9 @@ void gtk_sat_map_update(GtkWidget * widget)
     }
 }
 
-
-/** \brief Convert latitude and longitude to screen coordinates.
- *  \param m The GtkSatMap widget on which the conversion should be done.
- *  \param lat The latitude in decimal degrees North.
- *  \param lon The longitude in decimal degrees East.
- *  \param x The X coordinate on the screen (left to right)
- *  \param y The Y coordinate on the screen (top to bottom)
- *
- * Assumes that -180 <= lon <= 180 and -90 <= lat <= 90
- */
-static void
-lonlat_to_xy(GtkSatMap * p, gdouble lon, gdouble lat, gfloat * x, gfloat * y)
+/* Assumes that -180 <= lon <= 180 and -90 <= lat <= 90 */
+static void lonlat_to_xy(GtkSatMap * p, gdouble lon, gdouble lat, gfloat * x,
+                         gfloat * y)
 {
     *x = p->x0 + (lon - p->left_side_lon) * p->width / 360.0;
     *y = p->y0 + (90.0 - lat) * p->height / 180.0;
@@ -823,20 +679,8 @@ lonlat_to_xy(GtkSatMap * p, gdouble lon, gdouble lat, gfloat * x, gfloat * y)
     }
 }
 
-
-/** \brief Convert screen coordinates to latitude and longitude.
- *  \param m The GtkSatMap widget on which the conversion should be done.
- *  \param x The X coordinate on the screen (left to right)
- *  \param y The Y coordinate on the screen (top to bottom)
- *  \param lat The latitude in decimal degrees North.
- *  \param lon The longitude in decimal degrees East.
- *
- * The function will return nonsense when the cursor is off the map
- * so it is the responsibility of the consumer to check whether returned
- * values are in between valid ranges.
- */
-static void
-xy_to_lonlat(GtkSatMap * p, gfloat x, gfloat y, gfloat * lon, gfloat * lat)
+static void xy_to_lonlat(GtkSatMap * p, gfloat x, gfloat y, gfloat * lon,
+                         gfloat * lat)
 {
     *lat = 90.0 - (180.0 / p->height) * (y - p->y0);
     *lon = (360.0 / p->width) * (x - p->x0) + p->left_side_lon;
@@ -850,27 +694,20 @@ xy_to_lonlat(GtkSatMap * p, gfloat x, gfloat y, gfloat * lon, gfloat * lat)
     }
 }
 
-
-/** \brief Manage map motion events.
- *
- * This function is called every time the mouse is moving on the map. Its purpose
- * is to update the cursor text with lat and lon coordinates.
- */
-static          gboolean
-on_motion_notify(GooCanvasItem * item,
-                 GooCanvasItem * target, GdkEventMotion * event, gpointer data)
+static gboolean on_motion_notify(GooCanvasItem * item,
+                                 GooCanvasItem * target,
+                                 GdkEventMotion * event, gpointer data)
 {
     GtkSatMap      *satmap = GTK_SAT_MAP(data);
     gfloat          lat, lon;
     gchar          *text;
 
-    (void)target;               /* avoid unusued parameter compiler warning */
-    (void)item;                 /* avoid unusued parameter compiler warning */
+    (void)target;
+    (void)item;
 
     /* set text only if QTH info is enabled */
     if (satmap->cursinfo)
     {
-
         xy_to_lonlat(satmap, event->x, event->y, &lon, &lat);
 
         /* cursor track */
@@ -885,12 +722,8 @@ on_motion_notify(GooCanvasItem * item,
     return TRUE;
 }
 
-
-/** \brief Finish canvas item setup.
- *  \param canvas 
- *  \param item
- *  \param model 
- *  \param data Pointer to the GtkSatMap object.
+/*
+ * Finish canvas item setup.
  *
  * This function is called when a canvas item is created. Its purpose is to connect
  * the corresponding signals to the created items.
@@ -898,21 +731,19 @@ on_motion_notify(GooCanvasItem * item,
  * The root item, ie the background is connected to motion notify event, while other
  * items (sats) are connected to mouse click events.
  *
- * \bug Should filter out QTH or do we want to click on the QTH?
+ * @bug Should filter out QTH or do we want to click on the QTH?
  */
-static void
-on_item_created(GooCanvas * canvas,
-                GooCanvasItem * item,
-                GooCanvasItemModel * model, gpointer data)
+static void on_item_created(GooCanvas * canvas,
+                            GooCanvasItem * item,
+                            GooCanvasItemModel * model, gpointer data)
 {
-    (void)canvas;               /* avoid unusued parameter compiler warning */
+    (void)canvas;
     if (!goo_canvas_item_model_get_parent(model))
     {
         /* root item / canvas */
         g_signal_connect(item, "motion_notify_event",
                          (GCallback) on_motion_notify, data);
     }
-
     else if (!g_object_get_data(G_OBJECT(item), "skip-signal-connection"))
     {
         g_signal_connect(item, "button_press_event",
@@ -922,16 +753,9 @@ on_item_created(GooCanvas * canvas,
     }
 }
 
-
-/** \brief Manage button press events
- *
- * This function is called when a mouse button is pressed on a satellite object.
- * If the pressed button is #3 (right button) the satellite popup menu will be
- * created and executed.
- */
-static          gboolean
-on_button_press(GooCanvasItem * item,
-                GooCanvasItem * target, GdkEventButton * event, gpointer data)
+static gboolean on_button_press(GooCanvasItem * item,
+                                GooCanvasItem * target, GdkEventButton * event,
+                                gpointer data)
 {
     GooCanvasItemModel *model = goo_canvas_item_get_model(item);
     GtkSatMap      *satmap = GTK_SAT_MAP(data);
@@ -940,11 +764,10 @@ on_button_press(GooCanvasItem * item,
     gint           *catpoint = NULL;
     sat_t          *sat = NULL;
 
-    (void)target;               /* avoid unusued parameter compiler warning */
+    (void)target;
 
     switch (event->button)
     {
-
         /* double-left-click */
     case 1:
         if (event->type == GDK_2BUTTON_PRESS)
@@ -962,19 +785,14 @@ on_button_press(GooCanvasItem * item,
                 /* double-clicked on map */
             }
         }
-
         g_free(catpoint);
-
         break;
-
 
         /* pop-up menu */
     case 3:
         catpoint = g_try_new0(gint, 1);
         *catpoint = catnum;
-
         sat = SAT(g_hash_table_lookup(satmap->sats, catpoint));
-
         if (sat != NULL)
         {
             gtk_sat_map_popup_exec(sat, satmap->qth, satmap, event,
@@ -985,11 +803,8 @@ on_button_press(GooCanvasItem * item,
         {
             /* clicked on map -> map pop-up in the future */
         }
-
         g_free(catpoint);
-
         break;
-
     default:
         break;
     }
@@ -997,18 +812,9 @@ on_button_press(GooCanvasItem * item,
     return TRUE;
 }
 
-
-/** \brief Manage button release events.
- *
- * This function is called when the mouse button is released above
- * a satellite object. It will act as a button click and if the released
- * button is the left one, the click will correspond to selecting or
- * deselecting a satellite
- */
-static          gboolean
-on_button_release(GooCanvasItem * item,
-                  GooCanvasItem * target,
-                  GdkEventButton * event, gpointer data)
+static gboolean on_button_release(GooCanvasItem * item,
+                                  GooCanvasItem * target,
+                                  GdkEventButton * event, gpointer data)
 {
     GooCanvasItemModel *model = goo_canvas_item_get_model(item);
     GtkSatMap      *satmap = GTK_SAT_MAP(data);
@@ -1018,7 +824,7 @@ on_button_release(GooCanvasItem * item,
     sat_map_obj_t  *obj = NULL;
     guint32         col;
 
-    (void)target;               /* avoid unusued parameter compiler warning */
+    (void)target;
 
     catpoint = g_try_new0(gint, 1);
     *catpoint = catnum;
@@ -1081,12 +887,6 @@ on_button_release(GooCanvasItem * item,
     return TRUE;
 }
 
-
-/** \brief Clear selection.
- *
- * This function is used to clear the old selection when a new satellite
- * is selected.
- */
 static void clear_selection(gpointer key, gpointer val, gpointer data)
 {
     gint           *old = key;
@@ -1112,15 +912,12 @@ static void clear_selection(gpointer key, gpointer val, gpointer data)
     }
 }
 
-
-/** \brief select a satellite */
 void gtk_sat_map_select_sat(GtkWidget * satmap, gint catnum)
 {
     GtkSatMap      *smap = GTK_SAT_MAP(satmap);
     gint           *catpoint = NULL;
     sat_map_obj_t  *obj = NULL;
     guint32         col;
-
 
     catpoint = g_try_new0(gint, 1);
     *catpoint = catnum;
@@ -1155,10 +952,10 @@ void gtk_sat_map_select_sat(GtkWidget * satmap, gint catnum)
     }
 
     g_free(catpoint);
-
 }
 
-/** \brief Reconfigure map.
+/*
+ * Reconfigure map.
  *
  * This function should eventually reload all configuration for the GtkSatMap.
  * Currently this function is not implemented for any of the views. Reconfiguration
@@ -1166,14 +963,15 @@ void gtk_sat_map_select_sat(GtkWidget * satmap, gint catnum)
  */
 void gtk_sat_map_reconf(GtkWidget * widget, GKeyFile * cfgdat)
 {
-    (void)widget;               /* avoid unusued parameter compiler warning */
-    (void)cfgdat;               /* avoid unusued parameter compiler warning */
+    (void)widget;
+    (void)cfgdat;
 }
 
-
-/** \brief Safely load a map file.
- *  \param satmap The GtkSatMap widget
- *  \param clon The longitude that should be the center of the map
+/*
+ * Safely load a map file.
+ *
+ * @param satmap The GtkSatMap widget
+ * @param clon The longitude that should be the center of the map
  *
  * This function is called shortly after the canvas has been created. Its purpose
  * is to load a mapfile into satmap->origmap.
@@ -1186,7 +984,7 @@ void gtk_sat_map_reconf(GtkWidget * widget, GKeyFile * cfgdat)
  *   - If loading of default map does not succeed, create a dummy GdkPixbuf
  *     (and raise all possible alarms)
  *
- * \note satmap->cfgdata should contain a valid GKeyFile.
+ * @note satmap->cfgdata should contain a valid GKeyFile.
  *
  */
 static void load_map_file(GtkSatMap * satmap, float clon)
@@ -1269,17 +1067,9 @@ static void load_map_file(GtkSatMap * satmap, float clon)
         satmap->left_side_lon += clon;
     else if (clon < 0.0)
         satmap->left_side_lon = 180.0 + clon;
-
 }
 
-
-/** \brief Arccosine implementation. 
- *
- * Returns a value between zero and two pi.
- * Borrowed from gsat 0.9 by Xavier Crehueras, EB3CZS.
- * Optimized by Alexandru Csete.
- */
-static          gdouble arccos(gdouble x, gdouble y)
+static gdouble arccos(gdouble x, gdouble y)
 {
     if (x && y)
     {
@@ -1292,9 +1082,8 @@ static          gdouble arccos(gdouble x, gdouble y)
     return 0.0;
 }
 
-
-/** \brief Check whether the footprint covers the North or South pole. */
-static          gboolean pole_is_covered(sat_t * sat)
+/* Check whether the footprint covers the North or South pole. */
+static gboolean pole_is_covered(sat_t * sat)
 {
     if (north_pole_is_covered(sat) || south_pole_is_covered(sat))
         return TRUE;
@@ -1302,8 +1091,8 @@ static          gboolean pole_is_covered(sat_t * sat)
         return FALSE;
 }
 
-/** \brief Check whether the footprint covers the North pole. */
-static          gboolean north_pole_is_covered(sat_t * sat)
+/* Check whether the footprint covers the North pole. */
+static gboolean north_pole_is_covered(sat_t * sat)
 {
     int             ret1;
     gdouble         qrb1, az1;
@@ -1322,8 +1111,8 @@ static          gboolean north_pole_is_covered(sat_t * sat)
     return FALSE;
 }
 
-/** \brief Check whether the footprint covers the South pole. */
-static          gboolean south_pole_is_covered(sat_t * sat)
+/* Check whether the footprint covers the South pole. */
+static gboolean south_pole_is_covered(sat_t * sat)
 {
     int             ret1;
     gdouble         qrb1, az1;
@@ -1342,10 +1131,9 @@ static          gboolean south_pole_is_covered(sat_t * sat)
     return FALSE;
 }
 
-
-/** \brief Mirror the footprint longitude. */
-static          gboolean
-mirror_lon(sat_t * sat, gdouble rangelon, gdouble * mlon, gdouble mapbreak)
+/* Mirror the footprint longitude. */
+static gboolean mirror_lon(sat_t * sat, gdouble rangelon, gdouble * mlon,
+                           gdouble mapbreak)
 {
     gdouble         diff;
     gboolean        warped = FALSE;
@@ -1389,13 +1177,14 @@ mirror_lon(sat_t * sat, gdouble rangelon, gdouble * mlon, gdouble mapbreak)
     return warped;
 }
 
-
-/** \brief Calculate satellite footprint and coverage area.
- *  \param satmap TheGtkSatMap widget.
- *  \param sat The satellite.
- *  \param points1 Initialised GooCanvasPoints structure with 360 points.
- *  \param points2 Initialised GooCanvasPoints structure with 360 points.
- *  \return The number of range circle parts.
+/**
+ * Calculate satellite footprint and coverage area.
+ *
+ * @param satmap TheGtkSatMap widget.
+ * @param sat The satellite.
+ * @param points1 Initialised GooCanvasPoints structure with 360 points.
+ * @param points2 Initialised GooCanvasPoints structure with 360 points.
+ * @return The number of range circle parts.
  *
  * This function calculates the "left" side of the range circle and mirrors
  * the points in longitude to create the "right side of the range circle, too.
@@ -1422,7 +1211,7 @@ mirror_lon(sat_t * sat, gdouble rangelon, gdouble * mlon, gdouble mapbreak)
  * total number of points will always be 360, even with the addition of the two
  * extra points. 
  */
-static          guint calculate_footprint(GtkSatMap * satmap, sat_t * sat)
+static guint calculate_footprint(GtkSatMap * satmap, sat_t * sat)
 {
     guint           azi;
     gfloat          sx, sy, msx, msy, ssx, ssy;
@@ -1450,13 +1239,8 @@ static          guint calculate_footprint(GtkSatMap * satmap, sat_t * sat)
 
         if (azi == 0 && north_pole_is_covered(sat))
             rangelon = ssplon + pi;
-
-        else if (azi == 180 && south_pole_is_covered(sat))
-            rangelon = ssplon + pi;
-
         else if (fabs(num / dem) > 1.0)
             rangelon = ssplon;
-
         else
         {
             if ((180.0 - azi) >= 0)
@@ -1511,29 +1295,27 @@ static          guint calculate_footprint(GtkSatMap * satmap, sat_t * sat)
         numrc = 2;
 
     }
-
-    /* the nominal condition => points1 is adequate */
     else
     {
-
+        /* the nominal condition => points1 is adequate */
         numrc = 1;
-
     }
 
     return numrc;
 }
 
-
-/** \brief Split and sort polyline points.
- *  \param satmap The GtkSatMap structure.
- *  \param points1 GooCanvasPoints containing the footprint points.
- *  \param points2 A GooCanvasPoints structure containing the second set of points.
- *  \param sspx Canvas based x-coordinate of SSP.
- *  \bug We should ensure that the endpoints in points1 have x=x0, while in
- *       the endpoints in points2 should have x=x0+width (TBC).
+/**
+ * Split and sort polyline points.
  *
- * \note This function works on canvas-based coordinates rather than lat/lon
- * \note DO NOT USE this function when the footprint covers one of the poles
+ * @param satmap The GtkSatMap structure.
+ * @param points1 GooCanvasPoints containing the footprint points.
+ * @param points2 A GooCanvasPoints structure containing the second set of points.
+ * @param sspx Canvas based x-coordinate of SSP.
+ * @bug We should ensure that the endpoints in points1 have x=x0, while in
+ *      the endpoints in points2 should have x=x0+width (TBC).
+ *
+ * @note This function works on canvas-based coordinates rather than lat/lon
+ * @note DO NOT USE this function when the footprint covers one of the poles
  *       (the end result may freeze the X-server requiring a hard-reset!)
  */
 static void split_points(GtkSatMap * satmap, sat_t * sat, gdouble sspx)
@@ -1565,7 +1347,6 @@ static void split_points(GtkSatMap * satmap, sat_t * sat, gdouble sspx)
          */
         for (i = 0; i < n; i++)
         {
-
             if (points1->coords[2 * i] > (satmap->x0 + satmap->width / 2))
             {
                 tps1->coords[2 * n1] = points1->coords[2 * i];
@@ -1583,7 +1364,6 @@ static void split_points(GtkSatMap * satmap, sat_t * sat, gdouble sspx)
         sort_points_y(satmap, sat, tps1, n1);
         sort_points_y(satmap, sat, tps2, n2);
     }
-
     else if (sspx < (satmap->x0 + satmap->width / 2))
     {
         /* We are on the left side of the map.
@@ -1710,13 +1490,14 @@ static void split_points(GtkSatMap * satmap, sat_t * sat, gdouble sspx)
     }
 }
 
-
-/** \brief Sort points according to X coordinates.
- *  \param satmap The GtkSatMap structure.
- *  \param sat The satellite data structure.
- *  \param points The points to sort.
- *  \param num The number of points. By specifying it as parameter we can
- *             sort incomplete arrays.
+/**
+ * Sort points according to X coordinates.
+ *
+ * @param satmap The GtkSatMap structure.
+ * @param sat The satellite data structure.
+ * @param points The points to sort.
+ * @param num The number of points. By specifying it as parameter we can
+ *            sort incomplete arrays.
  *
  * This function sorts the points in ascending order with respect
  * to their x value. After sorting the function adds two extra points
@@ -1735,9 +1516,8 @@ static void split_points(GtkSatMap * satmap, sat_t * sat, gdouble sspx)
  * make any big difference anyway, since we have 360 points in total.
  *
  */
-static void
-sort_points_x(GtkSatMap * satmap, sat_t * sat, GooCanvasPoints * points,
-              gint num)
+static void sort_points_x(GtkSatMap * satmap, sat_t * sat,
+                          GooCanvasPoints * points, gint num)
 {
     gsize           size = 2 * sizeof(double);
 
@@ -1775,26 +1555,25 @@ sort_points_x(GtkSatMap * satmap, sat_t * sat, GooCanvasPoints * points,
     }
 }
 
-
-/** \brief Sort points according to Y coordinates.
- *  \param satmap The GtkSatMap structure.
- *  \param sat The satellite data structure.
- *  \param points The points to sort.
- *  \param num The number of points. By specifying it as parameter we can
- *             sort incomplete arrays.
+/**
+ * Sort points according to Y coordinates.
+ *
+ * @param satmap The GtkSatMap structure.
+ * @param sat The satellite data structure.
+ * @param points The points to sort.
+ * @param num The number of points. By specifying it as parameter we can
+ *            sort incomplete arrays.
  *
  * This function sorts the points in ascending order with respect
  * to their y value.
- *
  */
-static void
-sort_points_y(GtkSatMap * satmap, sat_t * sat, GooCanvasPoints * points,
-              gint num)
+static void sort_points_y(GtkSatMap * satmap, sat_t * sat,
+                          GooCanvasPoints * points, gint num)
 {
     gsize           size;
 
-    (void)satmap;               /* avoid unusued parameter compiler warning */
-    (void)sat;                  /* avoid unusued parameter compiler warning */
+    (void)satmap;
+    (void)sat;
     size = 2 * sizeof(double);
 
     /* call g_qsort_with_data, which warps the qsort function
@@ -1802,12 +1581,13 @@ sort_points_y(GtkSatMap * satmap, sat_t * sat, GooCanvasPoints * points,
     g_qsort_with_data(points->coords, num, size, compare_coordinates_y, NULL);
 }
 
-
-/** \brief Compare two X coordinates.
- *  \param a Pointer to one coordinate (x,y) both double.
- *  \param b Pointer to the second coordinate (x,y) both double.
- *  \param data User data; always NULL.
- *  \return Negative value if a < b; zero if a = b; positive value if a > b. 
+/**
+ * Compare two X coordinates.
+ *
+ * @param a Pointer to one coordinate (x,y) both double.
+ * @param b Pointer to the second coordinate (x,y) both double.
+ * @param data User data; always NULL.
+ * @return Negative value if a < b; zero if a = b; positive value if a > b. 
  *
  * This function is used by the g_qsort_with_data function to compare two
  * elements in the coordinate array of the GooCanvasPoints structure. We have
@@ -1819,19 +1599,18 @@ sort_points_y(GtkSatMap * satmap, sat_t * sat, GooCanvasPoints * points,
  * one (x).
  *
  */
-static          gint
-compare_coordinates_x(gconstpointer a, gconstpointer b, gpointer data)
+static gint compare_coordinates_x(gconstpointer a, gconstpointer b,
+                                  gpointer data)
 {
     double         *ea = (double *)a;
     double         *eb = (double *)b;
 
-    (void)data;                 /* avoid unusued parameter compiler warning */
+    (void)data;
 
     if (ea[0] < eb[0])
     {
         return -1;
     }
-
     else if (ea[0] > eb[0])
     {
         return 1;
@@ -1840,12 +1619,13 @@ compare_coordinates_x(gconstpointer a, gconstpointer b, gpointer data)
     return 0;
 }
 
-
-/** \brief Compare two Y coordinates.
- *  \param a Pointer to one coordinate (x,y) both double.
- *  \param b Pointer to the second coordinate (x,y) both double.
- *  \param data User data; always NULL.
- *  \return Negative value if a < b; zero if a = b; positive value if a > b. 
+/**
+ * Compare two Y coordinates.
+ *
+ * @param a Pointer to one coordinate (x,y) both double.
+ * @param b Pointer to the second coordinate (x,y) both double.
+ * @param data User data; always NULL.
+ * @return Negative value if a < b; zero if a = b; positive value if a > b. 
  *
  * This function is used by the g_qsort_with_data function to compare two
  * elements in the coordinate array of the GooCanvasPoints structure. We have
@@ -1857,13 +1637,13 @@ compare_coordinates_x(gconstpointer a, gconstpointer b, gpointer data)
  * one (y).
  *
  */
-static          gint
-compare_coordinates_y(gconstpointer a, gconstpointer b, gpointer data)
+static gint compare_coordinates_y(gconstpointer a, gconstpointer b,
+                                  gpointer data)
 {
     double         *ea = (double *)a;
     double         *eb = (double *)b;
 
-    (void)data;                 /* avoid unusued parameter compiler warning */
+    (void)data;
 
     if (ea[1] < eb[1])
     {
@@ -1878,11 +1658,12 @@ compare_coordinates_y(gconstpointer a, gconstpointer b, gpointer data)
     return 0;
 }
 
-
-/** \brief Plot a satellite.
- *  \param key The hash table key.
- *  \param value Pointer to the satellite.
- *  \param data Pointer to the GtkSatMap widget.
+/**
+ * Plot a satellite.
+ *
+ * @param key The hash table key.
+ * @param value Pointer to the satellite.
+ * @param data Pointer to the GtkSatMap widget.
  *
  * This function creates and initializes the canvas objects (rectangle, label,
  * footprint) for a satellite. The function is called as a g_hash_table_foreach
@@ -1899,7 +1680,7 @@ static void plot_sat(gpointer key, gpointer value, gpointer data)
     gfloat          x, y;
     gchar          *tooltip;
 
-    (void)key;                  /* avoid unusued parameter compiler warning */
+    (void)key;
 
     if (decayed(sat))
     {
@@ -2012,7 +1793,7 @@ static void plot_sat(gpointer key, gpointer value, gpointer data)
                                              x + 1,
                                              y + 3,
                                              -1,
-                                             GTK_ANCHOR_NORTH,
+                                             GOO_CANVAS_ANCHOR_NORTH,
                                              "font", "Sans 8",
                                              "fill-color-rgba", shadowcol,
                                              NULL);
@@ -2020,7 +1801,7 @@ static void plot_sat(gpointer key, gpointer value, gpointer data)
                                            x,
                                            y + 2,
                                            -1,
-                                           GTK_ANCHOR_NORTH,
+                                           GOO_CANVAS_ANCHOR_NORTH,
                                            "font", "Sans 8",
                                            "fill-color-rgba", col,
                                            "tooltip", tooltip, NULL);
@@ -2085,9 +1866,7 @@ static void plot_sat(gpointer key, gpointer value, gpointer data)
     g_hash_table_insert(satmap->obj, catnum, obj);
 }
 
-
-/** \brief Update a given satellite.
- */
+/** Update a given satellite. */
 static void update_sat(gpointer key, gpointer value, gpointer data)
 {
     gint           *catnum;
@@ -2127,7 +1906,6 @@ static void update_sat(gpointer key, gpointer value, gpointer data)
     /* get rid of a decayed satellite */
     if (decayed(sat) && obj != NULL)
     {
-        /* remove items */
         idx = goo_canvas_item_model_find_child(root, obj->marker);
         if (idx != -1)
             goo_canvas_item_model_remove_child(root, idx);;
@@ -2150,7 +1928,7 @@ static void update_sat(gpointer key, gpointer value, gpointer data)
         if (obj->showtrack)
             ground_track_update(satmap, sat, satmap->qth, obj, TRUE);
         g_free(obj);
-        /* remove obj from hash */
+
         g_hash_table_remove(satmap->obj, catnum);
         return;
     }
@@ -2176,15 +1954,9 @@ static void update_sat(gpointer key, gpointer value, gpointer data)
         update_selected(satmap, sat);
     }
 
-    //sat_debugger_get_ssp (&ssplo,&sspla);
-    //sat->ssplon = ssplo;
-    //sat->ssplat = sspla;
-
-    /* update the label */
     g_object_set(obj->label, "text", sat->nickname, NULL);
     g_object_set(obj->shadowl, "text", sat->nickname, NULL);
 
-    /* we update tooltips every time */
     aosstr = aoslos_time_to_str(satmap, sat);
     tooltip = g_markup_printf_escaped("<b>%s</b>\n"
                                       "Lon: %5.1f\302\260\n"
@@ -2210,8 +1982,6 @@ static void update_sat(gpointer key, gpointer value, gpointer data)
     if ((fabs(oldx - x) >= 2 * MARKER_SIZE_HALF) ||
         (fabs(oldy - y) >= 2 * MARKER_SIZE_HALF))
     {
-
-        /* update sat mark */
         g_object_set(obj->marker,
                      "x", (gdouble) (x - MARKER_SIZE_HALF),
                      "y", (gdouble) (y - MARKER_SIZE_HALF), NULL);
@@ -2219,48 +1989,47 @@ static void update_sat(gpointer key, gpointer value, gpointer data)
                      "x", (gdouble) (x - MARKER_SIZE_HALF + 1),
                      "y", (gdouble) (y - MARKER_SIZE_HALF + 1), NULL);
 
-        /* update sat label */
         if (x < 50)
         {
             g_object_set(obj->label,
                          "x", (gdouble) (x + 3),
-                         "y", (gdouble) (y), "anchor", GTK_ANCHOR_WEST, NULL);
-            g_object_set(obj->shadowl,
-                         "x", (gdouble) (x + 3 + 1),
-                         "y", (gdouble) (y + 1),
-                         "anchor", GTK_ANCHOR_WEST, NULL);
+                         "y", (gdouble) (y), "anchor", GOO_CANVAS_ANCHOR_WEST,
+                         NULL);
+            g_object_set(obj->shadowl, "x", (gdouble) (x + 3 + 1), "y",
+                         (gdouble) (y + 1), "anchor", GOO_CANVAS_ANCHOR_WEST,
+                         NULL);
         }
         else if ((satmap->width - x) < 50)
         {
             g_object_set(obj->label,
                          "x", (gdouble) (x - 3),
-                         "y", (gdouble) (y), "anchor", GTK_ANCHOR_EAST, NULL);
-            g_object_set(obj->shadowl,
-                         "x", (gdouble) (x - 3 + 1),
-                         "y", (gdouble) (y + 1),
-                         "anchor", GTK_ANCHOR_EAST, NULL);
+                         "y", (gdouble) (y), "anchor", GOO_CANVAS_ANCHOR_EAST,
+                         NULL);
+            g_object_set(obj->shadowl, "x", (gdouble) (x - 3 + 1), "y",
+                         (gdouble) (y + 1), "anchor", GOO_CANVAS_ANCHOR_EAST,
+                         NULL);
         }
         else if ((satmap->height - y) < 25)
         {
             g_object_set(obj->label,
                          "x", (gdouble) (x),
                          "y", (gdouble) (y - 2),
-                         "anchor", GTK_ANCHOR_SOUTH, NULL);
+                         "anchor", GOO_CANVAS_ANCHOR_SOUTH, NULL);
             g_object_set(obj->shadowl,
                          "x", (gdouble) (x + 1),
                          "y", (gdouble) (y - 2 + 1),
-                         "anchor", GTK_ANCHOR_SOUTH, NULL);
+                         "anchor", GOO_CANVAS_ANCHOR_SOUTH, NULL);
         }
         else
         {
             g_object_set(obj->label,
                          "x", (gdouble) (x),
                          "y", (gdouble) (y + 2),
-                         "anchor", GTK_ANCHOR_NORTH, NULL);
+                         "anchor", GOO_CANVAS_ANCHOR_NORTH, NULL);
             g_object_set(obj->shadowl,
                          "x", (gdouble) (x + 1),
                          "y", (gdouble) (y + 2 + 1),
-                         "anchor", GTK_ANCHOR_NORTH, NULL);
+                         "anchor", GOO_CANVAS_ANCHOR_NORTH, NULL);
         }
 
         /* initialize points for footprint */
@@ -2363,12 +2132,11 @@ static void update_sat(gpointer key, gpointer value, gpointer data)
     g_free(catnum);
 }
 
-
-/** \brief Update information about the selected satellite.
- *  \param satmap Pointer to the GtkSatMap widget.
- *  \param sat Pointer to the selected satellite
+/**
+ * Update information about the selected satellite.
  *
- * 
+ * @param satmap Pointer to the GtkSatMap widget.
+ * @param sat Pointer to the selected satellite
  */
 static void update_selected(GtkSatMap * satmap, sat_t * sat)
 {
@@ -2480,8 +2248,6 @@ static void update_selected(GtkSatMap * satmap, sat_t * sat)
     g_free(text);
 }
 
-
-/** \brief Add grid lines and labels to the map. */
 static void draw_grid_lines(GtkSatMap * satmap, GooCanvasItemModel * root)
 {
     gdouble         xstep, ystep;
@@ -2498,31 +2264,21 @@ static void draw_grid_lines(GtkSatMap * satmap, GooCanvasItemModel * root)
     xstep = (gdouble) (30.0 * satmap->width / 360.0);
     ystep = (gdouble) (30.0 * satmap->height / 180.0);
 
+#define MKLINE goo_canvas_polyline_model_new_line
+
     /* horizontal grid */
     for (i = 0; i < 5; i++)
     {
         /* line */
-        satmap->gridh[i] = goo_canvas_polyline_model_new_line(root,
-                                                              (gdouble)
-                                                              satmap->x0,
-                                                              (gdouble)
-                                                              (satmap->y0 +
-                                                               (i +
-                                                                1) * ystep),
-                                                              (gdouble)
-                                                              (satmap->x0 +
-                                                               satmap->width),
-                                                              (gdouble)
-                                                              (satmap->y0 +
-                                                               (i +
-                                                                1) * ystep),
-                                                              "stroke-color-rgba",
-                                                              col, "line-cap",
-                                                              CAIRO_LINE_CAP_SQUARE,
-                                                              "line-join",
-                                                              CAIRO_LINE_JOIN_MITER,
-                                                              "line-width",
-                                                              0.5, NULL);
+        satmap->gridh[i] = MKLINE(root,
+                                  (gdouble) satmap->x0,
+                                  (gdouble) (satmap->y0 + (i + 1) * ystep),
+                                  (gdouble) (satmap->x0 + satmap->width),
+                                  (gdouble) (satmap->y0 + (i + 1) * ystep),
+                                  "stroke-color-rgba", col,
+                                  "line-cap", CAIRO_LINE_CAP_SQUARE,
+                                  "line-join", CAIRO_LINE_JOIN_MITER,
+                                  "line-width", 0.5, NULL);
 
         /* FIXME: Use dotted line pattern? */
 
@@ -2550,7 +2306,7 @@ static void draw_grid_lines(GtkSatMap * satmap, GooCanvasItemModel * root)
                                                                    (i +
                                                                     1) *
                                                                    ystep), -1,
-                                                        GTK_ANCHOR_NORTH,
+                                                        GOO_CANVAS_ANCHOR_NORTH,
                                                         "font", "Sans 8",
                                                         "fill-color-rgba", col,
                                                         NULL);
@@ -2575,27 +2331,15 @@ static void draw_grid_lines(GtkSatMap * satmap, GooCanvasItemModel * root)
     for (i = 0; i < 11; i++)
     {
         /* line */
-        satmap->gridv[i] = goo_canvas_polyline_model_new_line(root,
-                                                              (gdouble)
-                                                              (satmap->x0 +
-                                                               (i +
-                                                                1) * xstep),
-                                                              (gdouble)
-                                                              satmap->y0,
-                                                              (gdouble)
-                                                              (satmap->x0 +
-                                                               (i +
-                                                                1) * xstep),
-                                                              (gdouble)
-                                                              (satmap->y0 +
-                                                               satmap->height),
-                                                              "stroke-color-rgba",
-                                                              col, "line-cap",
-                                                              CAIRO_LINE_CAP_SQUARE,
-                                                              "line-join",
-                                                              CAIRO_LINE_JOIN_MITER,
-                                                              "line-width",
-                                                              0.5, NULL);
+        satmap->gridv[i] = MKLINE(root,
+                                  (gdouble) (satmap->x0 + (i + 1) * xstep),
+                                  (gdouble) satmap->y0,
+                                  (gdouble) (satmap->x0 + (i + 1) * xstep),
+                                  (gdouble) (satmap->y0 + satmap->height),
+                                  "stroke-color-rgba", col,
+                                  "line-cap", CAIRO_LINE_CAP_SQUARE,
+                                  "line-join", CAIRO_LINE_JOIN_MITER,
+                                  "line-width", 0.5, NULL);
 
         /* label */
         xy_to_lonlat(satmap, satmap->x0 + (i + 1) * xstep, satmap->y0, &lon,
@@ -2620,9 +2364,9 @@ static void draw_grid_lines(GtkSatMap * satmap, GooCanvasItemModel * root)
                                                                     1) *
                                                                    xstep),
                                                         (gdouble) (satmap->y0 +
-                                                                   satmap->
-                                                                   height - 5),
-                                                        -1, GTK_ANCHOR_EAST,
+                                                                   satmap->height
+                                                                   - 5), -1,
+                                                        GOO_CANVAS_ANCHOR_EAST,
                                                         "font", "Sans 8",
                                                         "fill-color-rgba", col,
                                                         NULL);
@@ -2644,8 +2388,6 @@ static void draw_grid_lines(GtkSatMap * satmap, GooCanvasItemModel * root)
     }
 }
 
-
-/** \brief Add solar terminator to the map. */
 static void draw_terminator(GtkSatMap * satmap, GooCanvasItemModel * root)
 {
     guint32         terminator_col;
@@ -2679,11 +2421,9 @@ static void draw_terminator(GtkSatMap * satmap, GooCanvasItemModel * root)
 
     goo_canvas_item_model_raise(satmap->terminator, satmap->map);
 
-    satmap->terminator_time_out = 0;
+    satmap->terminator_last_tstamp = satmap->tstamp;
 }
 
-
-/** \brief Redraw grid lines and labels. */
 static void redraw_grid_lines(GtkSatMap * satmap)
 {
     GooCanvasPoints *line;
@@ -2756,16 +2496,11 @@ static void redraw_grid_lines(GtkSatMap * satmap)
     }
 }
 
-
-
 static inline gdouble sgn(gdouble const t)
 {
     return t < 0.0 ? -1.0 : 1.0;
 }
 
-
-
-/** \brief Redraw solar terminator. */
 static void redraw_terminator(GtkSatMap * satmap)
 {
     /* Set of (x, y) points along the terminator, one on each line of longitude in
@@ -2797,8 +2532,6 @@ static void redraw_terminator(GtkSatMap * satmap)
 
     /* Vector cross-product of (lx,ly,lz) and sun vector. */
     gdouble         rx, ry, rz;
-
-
 
     line = goo_canvas_points_new(363);
 
@@ -2842,8 +2575,6 @@ static void redraw_terminator(GtkSatMap * satmap)
     goo_canvas_points_unref(line);
 }
 
-
-/** \brief  Public wrapper for private conversion function. */
 void gtk_sat_map_lonlat_to_xy(GtkSatMap * m,
                               gdouble lon, gdouble lat,
                               gdouble * x, gdouble * y)
@@ -2859,8 +2590,6 @@ void gtk_sat_map_lonlat_to_xy(GtkSatMap * m,
     *y = (gdouble) fy;
 }
 
-
-/** \brief Reload reference to satellites (e.g. after TLE update). */
 void gtk_sat_map_reload_sats(GtkWidget * satmap, GHashTable * sats)
 {
     GTK_SAT_MAP(satmap)->sats = sats;
@@ -2871,16 +2600,16 @@ void gtk_sat_map_reload_sats(GtkWidget * satmap, GHashTable * sats)
     g_hash_table_foreach(GTK_SAT_MAP(satmap)->obj, reset_ground_track, NULL);
 }
 
-/** \brief Reset ground track orbit to force redraw. */
 static void reset_ground_track(gpointer key, gpointer value,
                                gpointer user_data)
 {
     sat_map_obj_t  *obj = (sat_map_obj_t *) value;
+    (void) key;
+    (void) user_data;
 
     obj->track_orbit = 0;
 }
 
-/** \brief Convert AOS or LOS timestamp to human readable countdown string */
 static gchar   *aoslos_time_to_str(GtkSatMap * satmap, sat_t * sat)
 {
     guint           h, m, s;
@@ -2917,7 +2646,7 @@ static gchar   *aoslos_time_to_str(GtkSatMap * satmap, sat_t * sat)
     return text;
 }
 
-/** \brief Load the satellites that we should show tracks for */
+/** Load the satellites that we should show tracks for */
 static void gtk_sat_map_load_showtracks(GtkSatMap * satmap)
 {
     mod_cfg_get_integer_list_boolean(satmap->cfgdata,
@@ -2927,7 +2656,7 @@ static void gtk_sat_map_load_showtracks(GtkSatMap * satmap)
 
 }
 
-/** \brief Save the satellites that we should not show ground tracks */
+/** Save the satellites that we should not show ground tracks */
 static void gtk_sat_map_store_showtracks(GtkSatMap * satmap)
 {
     mod_cfg_set_integer_list_boolean(satmap->cfgdata,
@@ -2936,7 +2665,7 @@ static void gtk_sat_map_store_showtracks(GtkSatMap * satmap)
                                      MOD_CFG_MAP_SHOWTRACKS);
 }
 
-/** \brief save the satellites that we should not highlight coverage */
+/** Save the satellites that we should not highlight coverage */
 static void gtk_sat_map_store_hidecovs(GtkSatMap * satmap)
 {
     mod_cfg_set_integer_list_boolean(satmap->cfgdata,
@@ -2945,7 +2674,7 @@ static void gtk_sat_map_store_hidecovs(GtkSatMap * satmap)
                                      MOD_CFG_MAP_HIDECOVS);
 }
 
-/** \brief Load the satellites that we should not highlight coverage */
+/** Load the satellites that we should not highlight coverage */
 static void gtk_sat_map_load_hide_coverages(GtkSatMap * satmap)
 {
     mod_cfg_get_integer_list_boolean(satmap->cfgdata,

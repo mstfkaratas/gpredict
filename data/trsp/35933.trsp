@@ -1,7 +1,0 @@
-[Mode U Beacon]
-DOWN_LOW=436000000
-MODE=CW
-
-[Mode U Telemetry]
-DOWN_LOW=436000000
-MODE=9k6/4k8 GMSK

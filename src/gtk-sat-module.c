@@ -1,18 +1,8 @@
-/* -*- Mode: C; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /*
   Gpredict: Real-time satellite tracking and orbit prediction program
 
-  Copyright (C)  2001-2013  Alexandru Csete, OZ9AEC.
-
-
-  Authors: Alexandru Csete <oz9aec@gmail.com>
-           Charles Suprin  <hamaa1vs@gmail.com>
-
-  Comments, questions and bugreports should be submitted via
-  http://sourceforge.net/projects/gpredict/
-  More details can be found at the project home page:
-
-  http://gpredict.oz9aec.net/
+  Copyright (C)  2001-2017  Alexandru Csete, OZ9AEC.
+                            Charles Suprin, AA1VS.
  
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -27,9 +17,8 @@
   You should have received a copy of the GNU General Public License
   along with this program; if not, visit http://www.fsf.org/
 */
-
 /**
- * \brief Main module container.
+ * Main module container.
  *
  * The GtkSatModule widget is the top level container that contains the
  * individual views. These views are of type GtkSatList, GtkSatMap, GtkSingleSat,
@@ -42,167 +31,110 @@
  * associated to it. These associations exist because theu share QTH and
  * satellite data.
  */
-#include <gtk/gtk.h>
-#include <glib/gi18n.h>
-#include <sys/time.h>
-#include "sgpsdp/sgp4sdp4.h"
-#include "sat-log.h"
-#include "gpredict-utils.h"
-#include "config-keys.h"
-#include "sat-cfg.h"
-#include "mod-cfg.h"
-#include "mod-cfg-get-param.h"
-#include "mod-mgr.h"
+
 #ifdef HAVE_CONFIG_H
 #include <build-config.h>
 #endif
-#include "time-tools.h"
-#include "orbit-tools.h"
-#include "predict-tools.h"
+
+#include <gtk/gtk.h>
+#include <glib/gi18n.h>
+#include <sys/time.h>
+
+#include "compat.h"
+#include "config-keys.h"
+#include "gpredict-utils.h"
+#include "gtk-event-list.h"
+#include "gtk-polar-view.h"
+#include "gtk-rig-ctrl.h"
+#include "gtk-rot-ctrl.h"
+#include "gtk-sat-list.h"
+#include "gtk-sat-map.h"
 #include "gtk-sat-module.h"
 #include "gtk-sat-module-popup.h"
 #include "gtk-sat-module-tmg.h"
-#include "gtk-sat-list.h"
-#include "gtk-sat-map.h"
-#include "gtk-polar-view.h"
 #include "gtk-single-sat.h"
-#include "gtk-event-list.h"
-#include "gtk-rig-ctrl.h"
-#include "gtk-rot-ctrl.h"
 #include "gtk-sky-glance.h"
-#include "compat.h"
+#include "mod-cfg.h"
+#include "mod-cfg-get-param.h"
+#include "mod-mgr.h"
+#include "orbit-tools.h"
+#include "predict-tools.h"
+#include "sat-cfg.h"
+#include "sat-log.h"
+#include "sgpsdp/sgp4sdp4.h"
 #include "time-tools.h"
 
-//#ifdef G_OS_WIN32
-//#  include "libc_internal.h"
-//#  include "libc_interface.h"
-//#endif
-
-static void     gtk_sat_module_class_init(GtkSatModuleClass * class);
-static void     gtk_sat_module_init(GtkSatModule * module);
-static void     gtk_sat_module_destroy(GtkObject * object);
-static void     gtk_sat_module_read_cfg_data(GtkSatModule * module,
-                                             const gchar * cfgfile);
-
-static void     gtk_sat_module_load_sats(GtkSatModule * module);
-static void     gtk_sat_module_free_sat(gpointer sat);
-static gboolean gtk_sat_module_timeout_cb(gpointer module);
-static void     gtk_sat_module_update_sat(gpointer key,
-                                          gpointer val, gpointer data);
-static void     gtk_sat_module_popup_cb(GtkWidget * button, gpointer data);
-
-static void     update_header(GtkSatModule * module);
-static void     update_child(GtkWidget * child, gdouble tstamp);
-static void     create_module_layout(GtkSatModule * module);
-static void     get_grid_size(GtkSatModule * module, guint * rows,
-                              guint * cols);
-static GtkWidget *create_view(GtkSatModule * module, guint num);
-
-static void     reload_sats_in_child(GtkWidget * widget,
-                                     GtkSatModule * module);
-
-static void     update_skg(GtkSatModule * module);
-static void     update_autotrack(GtkSatModule * module);
 
 static GtkVBoxClass *parent_class = NULL;
 
 
-GType gtk_sat_module_get_type()
+static void gtk_sat_module_free_sat(gpointer sat)
 {
-    static GType    gtk_sat_module_type = 0;
+    gtk_sat_data_free_sat(SAT(sat));
+}
 
-    if (!gtk_sat_module_type)
+static void update_autotrack(GtkSatModule * module)
+{
+    GList          *satlist = NULL;
+    GList          *iter;
+    sat_t          *sat = NULL;
+    guint           i, n;
+    double          next_aos;
+    gint            next_sat;
+
+    if (module->target > 0)
+        sat = g_hash_table_lookup(module->satellites, &module->target);
+
+    /* do nothing if current target is still above horizon */
+    if (sat != NULL && sat->el > 0.0)
+        return;
+
+    /* set target to satellite with next AOS */
+    satlist = g_hash_table_get_values(module->satellites);
+    iter = satlist;
+    n = g_list_length(satlist);
+    if (n == 0)
+        return;
+
+    next_aos = module->tmgCdnum + 10.f; /* hope there is AOS within 10 days */
+    next_sat = module->target;
+
+    i = 0;
+    while (i++ < n)
     {
-        static const GTypeInfo gtk_sat_module_info = {
-            sizeof(GtkSatModuleClass),
-            NULL,               /* base_init */
-            NULL,               /* base_finalize */
-            (GClassInitFunc) gtk_sat_module_class_init,
-            NULL,               /* class_finalize */
-            NULL,               /* class_data */
-            sizeof(GtkSatModule),
-            5,                  /* n_preallocs */
-            (GInstanceInitFunc) gtk_sat_module_init,
-            NULL
-        };
+        sat = (sat_t *) iter->data;
 
-        gtk_sat_module_type = g_type_register_static(GTK_TYPE_VBOX,
-                                                     "GtkSatModule",
-                                                     &gtk_sat_module_info, 0);
+        /* if sat is above horizon, select it and we are done */
+        if (sat->el > 0.0)
+        {
+            next_sat = sat->tle.catnr;
+            break;
+        }
+
+        /* we have a candidate if AOS is in the future */
+        if (sat->aos > module->tmgCdnum && sat->aos < next_aos)
+        {
+            next_aos = sat->aos;
+            next_sat = sat->tle.catnr;
+        }
+
+        iter = iter->next;
     }
 
-    return gtk_sat_module_type;
+    if (next_sat != module->target)
+    {
+        sat_log_log(SAT_LOG_LEVEL_INFO,
+                    _("Autotrack: Changing target satellite %d -> %d"),
+                    module->target, next_sat);
+        gtk_sat_module_select_sat(module, next_sat);
+    }
+
+    g_list_free(satlist);
 }
 
-static void gtk_sat_module_class_init(GtkSatModuleClass * class)
+static void gtk_sat_module_destroy(GtkWidget * widget)
 {
-    /*GObjectClass      *gobject_class; */
-    GtkObjectClass *object_class;
-
-    /*GtkWidgetClass    *widget_class; */
-    /*GtkContainerClass *container_class; */
-
-    /*gobject_class   = G_OBJECT_CLASS (class); */
-    object_class = (GtkObjectClass *) class;
-    /*widget_class    = (GtkWidgetClass*) class; */
-    /*container_class = (GtkContainerClass*) class; */
-
-    parent_class = g_type_class_peek_parent(class);
-
-    object_class->destroy = gtk_sat_module_destroy;
-}
-
-/** Initialise GtkSatModule widget */
-static void gtk_sat_module_init(GtkSatModule * module)
-{
-    /* initialise data structures */
-    module->win = NULL;
-
-    module->qth = g_try_new0(qth_t, 1);
-    qth_init(module->qth);
-
-    module->satellites = g_hash_table_new_full(g_int_hash,
-                                               g_int_equal,
-                                               g_free,
-                                               gtk_sat_module_free_sat);
-
-    module->rotctrlwin = NULL;
-    module->rotctrl = NULL;
-    module->rigctrlwin = NULL;
-    module->rigctrl = NULL;
-    module->skgwin = NULL;
-    module->skg = NULL;
-    module->lastSkgUpd = 0.0;
-
-    module->state = GTK_SAT_MOD_STATE_DOCKED;
-
-    g_mutex_init(&module->busy);
-
-    /* open the gpsd device */
-    module->gps_data = NULL;
-
-    module->grid = NULL;
-    module->views = NULL;
-    module->nviews = 0;
-
-    module->timerid = 0;
-
-    module->throttle = 1;
-    module->rtNow = 0.0;
-    module->rtPrev = 0.0;
-    module->tmgActive = FALSE;
-    module->tmgPdnum = 0.0;
-    module->tmgCdnum = 0.0;
-    module->tmgReset = FALSE;
-
-    module->target = -1;
-    module->autotrack = FALSE;
-}
-
-
-static void gtk_sat_module_destroy(GtkObject * object)
-{
-    GtkSatModule   *module = GTK_SAT_MODULE(object);
+    GtkSatModule   *module = GTK_SAT_MODULE(widget);
 
     /*save the configuration */
     mod_cfg_save(module->name, module->cfgdata);
@@ -256,180 +188,96 @@ static void gtk_sat_module_destroy(GtkObject * object)
 
     /* FIXME: free module->views? */
 
-    (*GTK_OBJECT_CLASS(parent_class)->destroy) (object);
+    (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-
-/**
- * \brief Create a new GtkSatModule widget.
- * \param cfgfile The name of the configuration file (.mod)
- * 
- * \bug Program goes into infinite loop when there is something
- *      wrong with cfg file.
- */
-GtkWidget      *gtk_sat_module_new(const gchar * cfgfile)
+static void gtk_sat_module_class_init(GtkSatModuleClass * class)
 {
-    GtkWidget      *widget;
-    GtkWidget      *butbox;
+    GtkWidgetClass    *widget_class;
 
-    /* Read configuration data.
-       If cfgfile is not existing or is NULL, start the wizard
-       in order to create a new configuration.
-     */
-    if ((cfgfile == NULL) || !g_file_test(cfgfile, G_FILE_TEST_EXISTS))
+    widget_class = (GtkWidgetClass *) class;
+    widget_class->destroy = gtk_sat_module_destroy;
+    parent_class = g_type_class_peek_parent(class);
+}
+
+/** Initialise GtkSatModule widget */
+static void gtk_sat_module_init(GtkSatModule * module)
+{
+    /* initialise data structures */
+    module->win = NULL;
+
+    module->qth = g_try_new0(qth_t, 1);
+    qth_init(module->qth);
+
+    module->satellites = g_hash_table_new_full(g_int_hash, g_int_equal,
+                                               g_free, gtk_sat_module_free_sat);
+
+    module->rotctrlwin = NULL;
+    module->rotctrl = NULL;
+    module->rigctrlwin = NULL;
+    module->rigctrl = NULL;
+    module->skgwin = NULL;
+    module->skg = NULL;
+    module->lastSkgUpd = 0.0;
+
+    module->state = GTK_SAT_MOD_STATE_DOCKED;
+
+    g_mutex_init(&module->busy);
+
+    /* open the gpsd device */
+    module->gps_data = NULL;
+
+    module->grid = NULL;
+    module->views = NULL;
+    module->nviews = 0;
+
+    module->timerid = 0;
+
+    module->throttle = 1;
+    module->rtNow = 0.0;
+    module->rtPrev = 0.0;
+    module->tmgActive = FALSE;
+    module->tmgPdnum = 0.0;
+    module->tmgCdnum = 0.0;
+    module->tmgReset = FALSE;
+
+    module->target = -1;
+    module->autotrack = FALSE;
+}
+
+GType gtk_sat_module_get_type()
+{
+    static GType    gtk_sat_module_type = 0;
+
+    if (!gtk_sat_module_type)
     {
+        static const GTypeInfo gtk_sat_module_info = {
+            sizeof(GtkSatModuleClass),
+            NULL,               /* base_init */
+            NULL,               /* base_finalize */
+            (GClassInitFunc) gtk_sat_module_class_init,
+            NULL,               /* class_finalize */
+            NULL,               /* class_data */
+            sizeof(GtkSatModule),
+            5,                  /* n_preallocs */
+            (GInstanceInitFunc) gtk_sat_module_init,
+            NULL
+        };
 
-        sat_log_log(SAT_LOG_LEVEL_ERROR,
-                    _("%s: Module %s is not valid."), __func__, cfgfile);
-
-        return NULL;
+        gtk_sat_module_type = g_type_register_static(GTK_TYPE_BOX,
+                                                     "GtkSatModule",
+                                                     &gtk_sat_module_info, 0);
     }
 
-    /* create module widget */
-    widget = g_object_new(GTK_TYPE_SAT_MODULE, NULL);
-
-//    g_signal_connect (widget, "realize",
-//                      G_CALLBACK (fix_child_allocations), NULL);
-
-    /* load configuration; note that this will also set the module name */
-    gtk_sat_module_read_cfg_data(GTK_SAT_MODULE(widget), cfgfile);
-
-    /*check that we loaded some reasonable data */
-    if (GTK_SAT_MODULE(widget)->cfgdata == NULL)
-    {
-        sat_log_log(SAT_LOG_LEVEL_ERROR,
-                    _("%s: Module %s has problems."), __func__, cfgfile);
-
-        return NULL;
-    }
-    /*initialize the qth engine and get position */
-    qth_data_update_init(GTK_SAT_MODULE(widget)->qth);
-
-    /* module state */
-    if ((g_key_file_has_key(GTK_SAT_MODULE(widget)->cfgdata,
-                            MOD_CFG_GLOBAL_SECTION,
-                            MOD_CFG_STATE, NULL)) &&
-        sat_cfg_get_bool(SAT_CFG_BOOL_MOD_STATE))
-    {
-        GTK_SAT_MODULE(widget)->state =
-            g_key_file_get_integer(GTK_SAT_MODULE(widget)->cfgdata,
-                                   MOD_CFG_GLOBAL_SECTION,
-                                   MOD_CFG_STATE, NULL);
-    }
-    else
-    {
-        GTK_SAT_MODULE(widget)->state = GTK_SAT_MOD_STATE_DOCKED;
-    }
-
-    /* initialise time keeping vars to current time */
-    GTK_SAT_MODULE(widget)->rtNow = get_current_daynum();
-    GTK_SAT_MODULE(widget)->rtPrev = get_current_daynum();
-    GTK_SAT_MODULE(widget)->tmgPdnum = get_current_daynum();
-    GTK_SAT_MODULE(widget)->tmgCdnum = get_current_daynum();
-
-    /* load satellites */
-    gtk_sat_module_load_sats(GTK_SAT_MODULE(widget));
-
-    /* create buttons */
-    GTK_SAT_MODULE(widget)->popup_button =
-        gpredict_mini_mod_button("gpredict-mod-popup.png",
-                                 _("Module options / shortcuts"));
-    g_signal_connect(GTK_SAT_MODULE(widget)->popup_button, "clicked",
-                     G_CALLBACK(gtk_sat_module_popup_cb), widget);
-
-    GTK_SAT_MODULE(widget)->close_button =
-        gpredict_mini_mod_button("gpredict-mod-close.png",
-                                 _("Close this module."));
-    g_signal_connect(GTK_SAT_MODULE(widget)->close_button, "clicked",
-                     G_CALLBACK(gtk_sat_module_close_cb), widget);
-
-    /* create header; header should not be updated more than
-       once pr. second.
-     */
-    GTK_SAT_MODULE(widget)->header = gtk_label_new(NULL);
-    GTK_SAT_MODULE(widget)->head_count = 0;
-    GTK_SAT_MODULE(widget)->head_timeout =
-        (GTK_SAT_MODULE(widget)->timeout > 1000 ? 1 :
-         (guint) floor(1000 / GTK_SAT_MODULE(widget)->timeout));
-
-    /* Event timeout
-       Update every minute FIXME: user configurable
-     */
-    GTK_SAT_MODULE(widget)->event_timeout =
-        (GTK_SAT_MODULE(widget)->timeout > 60000 ? 1 :
-         (guint) floor(60000 / GTK_SAT_MODULE(widget)->timeout));
-    /* force update the first time */
-    GTK_SAT_MODULE(widget)->event_count =
-        GTK_SAT_MODULE(widget)->event_timeout;
-
-    butbox = gtk_hbox_new(FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(butbox),
-                       GTK_SAT_MODULE(widget)->header, FALSE, FALSE, 10);
-    gtk_box_pack_end(GTK_BOX(butbox),
-                     GTK_SAT_MODULE(widget)->close_button, FALSE, FALSE, 0);
-    gtk_box_pack_end(GTK_BOX(butbox),
-                     GTK_SAT_MODULE(widget)->popup_button, FALSE, FALSE, 0);
-
-    gtk_box_pack_start(GTK_BOX(widget), butbox, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(widget), gtk_hseparator_new(), FALSE, FALSE, 0);
-
-    create_module_layout(GTK_SAT_MODULE(widget));
-
-    gtk_widget_show_all(widget);
-
-    /* start timeout */
-    GTK_SAT_MODULE(widget)->timerid =
-        g_timeout_add(GTK_SAT_MODULE(widget)->timeout,
-                      gtk_sat_module_timeout_cb, widget);
-
-    return widget;
+    return gtk_sat_module_type;
 }
 
 /**
- * \brief Create module layout and add views.
+ * Create a new view.
  *
- * It is assumed that module->grid and module->nviews have
- * coherent values.
- */
-static void create_module_layout(GtkSatModule * module)
-{
-    GtkWidget      *table;
-    GtkWidget      *view;
-    guint           rows, cols;
-    guint           i;
-
-    /* calculate the number of rows and columns necessary */
-    get_grid_size(module, &rows, &cols);
-    sat_log_log(SAT_LOG_LEVEL_DEBUG,
-                _("%s: Layout has %d columns and %d rows."),
-                __func__, cols, rows);
-
-    table = gtk_table_new(rows, cols, TRUE);
-
-    for (i = 0; i < module->nviews; i++)
-    {
-        /* create the view */
-        view = create_view(module, module->grid[5 * i]);
-
-        /* store a pointer to the view */
-        module->views = g_slist_append(module->views, view);
-
-        /* add view to the grid */
-        gtk_table_attach_defaults(GTK_TABLE(table), view,
-                                  module->grid[5 * i + 1],
-                                  module->grid[5 * i + 2],
-                                  module->grid[5 * i + 3],
-                                  module->grid[5 * i + 4]);
-    }
-
-    gtk_container_add(GTK_CONTAINER(module), table);
-}
-
-/**
- * \brief Create a new view.
- * \param module Pointer to the parent GtkSatModule widget
- * \param num The number ID of the view to create, see gtk_sat_mod_view_t
- * \return Pointer to a new GtkWidget of type corresponding to num. If num
+ * @param module Pointer to the parent GtkSatModule widget
+ * @param num The number ID of the view to create, see gtk_sat_mod_view_t
+ * @return Pointer to a new GtkWidget of type corresponding to num. If num
  *         is invalid, a GtkSatList is returned.
  */
 static GtkWidget *create_view(GtkSatModule * module, guint num)
@@ -477,151 +325,75 @@ static GtkWidget *create_view(GtkSatModule * module, guint num)
 }
 
 /**
- * \brief Read moule configuration data.
- * \ingroup satmodpriv
- * \param module The GtkSatModule to which the configuration will be applied.
- * \param cfgfile The configuration file.
+ * Calculate the layout grid size.
+ *
+ * @param module Pointer to the GtkSatModule widget.
+ * @param rows Return value for number of rows
+ * @param cols Return value for number of columns
+ *
+ * It is assumed that module->grid and module->nviews have chierent values.
  */
-static void
-gtk_sat_module_read_cfg_data(GtkSatModule * module, const gchar * cfgfile)
+static void get_grid_size(GtkSatModule * module, guint * rows, guint * cols)
 {
-    gchar          *buffer = NULL;
-    gchar          *qthfile;
-    gchar          *confdir;
-    gchar         **buffv;
-    guint           length, i;
-    GError         *error = NULL;
+    guint           i;
+    guint           xmax = 0;
+    guint           ymax = 0;
 
-    module->cfgdata = g_key_file_new();
-    g_key_file_set_list_separator(module->cfgdata, ';');
-
-    /* Bail out with error message if data can not be read */
-    if (!g_key_file_load_from_file(module->cfgdata, cfgfile,
-                                   G_KEY_FILE_KEEP_COMMENTS, &error))
+    for (i = 0; i < module->nviews; i++)
     {
-        g_key_file_free(module->cfgdata);
-        module->cfgdata = NULL;
-        sat_log_log(SAT_LOG_LEVEL_ERROR,
-                    _("%s: Could not load config data from %s (%s)."),
-                    __func__, cfgfile, error->message);
-
-        g_clear_error(&error);
-
-        return;
+        xmax = MAX(xmax, module->grid[5 * i + 2]);
+        ymax = MAX(ymax, module->grid[5 * i + 4]);
     }
 
-    /* debug message */
-    sat_log_log(SAT_LOG_LEVEL_DEBUG,
-                _("%s: Reading configuration from %s"), __func__, cfgfile);
-
-    /* set module name */
-    buffer = g_path_get_basename(cfgfile);
-    buffv = g_strsplit(buffer, ".mod", 0);
-    module->name = g_strdup(buffv[0]);
-    g_free(buffer);
-    g_strfreev(buffv);
-
-    /* get qth file */
-    buffer = mod_cfg_get_str(module->cfgdata,
-                             MOD_CFG_GLOBAL_SECTION,
-                             MOD_CFG_QTH_FILE_KEY, SAT_CFG_STR_DEF_QTH);
-
-    confdir = get_user_conf_dir();
-    qthfile = g_strconcat(confdir, G_DIR_SEPARATOR_S, buffer, NULL);
-
-    /* load QTH data */
-    if (!qth_data_read(qthfile, module->qth))
-    {
-        /* QTH file was not found for some reason */
-        g_free(buffer);
-        g_free(qthfile);
-
-        /* remove cfg key */
-        g_key_file_remove_key(module->cfgdata,
-                              MOD_CFG_GLOBAL_SECTION,
-                              MOD_CFG_QTH_FILE_KEY, NULL);
-
-        /* save modified cfg data to file */
-        mod_cfg_save(module->name, module->cfgdata);
-
-        /* try SAT_CFG_STR_DEF_QTH */
-        buffer = sat_cfg_get_str(SAT_CFG_STR_DEF_QTH);
-        qthfile = g_strconcat(confdir, G_DIR_SEPARATOR_S, buffer, NULL);
-
-        if (!qth_data_read(qthfile, module->qth))
-        {
-            sat_log_log(SAT_LOG_LEVEL_ERROR,
-                        _
-                        ("%s: Can not load default QTH file %s; using built-in defaults"),
-                        __func__, buffer);
-
-            /* settings are really screwed up; we need some safe values here */
-            qth_safe(module->qth);
-        }
-    }
-
-    g_free(buffer);
-    g_free(confdir);
-    g_free(qthfile);
-
-    /* get timeout value */
-    module->timeout = mod_cfg_get_int(module->cfgdata,
-                                      MOD_CFG_GLOBAL_SECTION,
-                                      MOD_CFG_TIMEOUT_KEY,
-                                      SAT_CFG_INT_MODULE_TIMEOUT);
-
-    /* get grid layout configuration (introduced in 1.2) */
-    buffer = mod_cfg_get_str(module->cfgdata,
-                             MOD_CFG_GLOBAL_SECTION,
-                             MOD_CFG_GRID, SAT_CFG_STR_MODULE_GRID);
-
-    /* convert to an integer list */
-    buffv = g_strsplit(buffer, ";", 0);
-    length = g_strv_length(buffv);
-    if ((length == 0) || (length % 5 != 0))
-    {
-        /* the grid configuration is bogus; override with global default */
-        sat_log_log(SAT_LOG_LEVEL_ERROR,
-                    _("%s: Module layout is invalid: %s. Using default."),
-                    __func__, buffer);
-        g_free(buffer);
-        g_strfreev(buffv);
-
-        buffer = sat_cfg_get_str_def(SAT_CFG_STR_MODULE_GRID);
-        buffv = g_strsplit(buffer, ";", 0);
-        length = g_strv_length(buffv);
-    }
-
-    /* make a debug log entry */
-    sat_log_log(SAT_LOG_LEVEL_DEBUG,
-                _("%s: GRID(%d): %s"), __func__, length, buffer);
-    g_free(buffer);
-
-    /* number of views: we have five numbers per view (type,left,right,top,bottom) */
-    module->nviews = length / 5;
-    module->grid = g_try_new0(guint, length);
-
-    /* if we cannot allocate memory for the grid zero the views out and log */
-    if (module->grid != NULL)
-    {
-        /* convert chars to integers */
-        for (i = 0; i < length; i++)
-        {
-            module->grid[i] = (gint) g_ascii_strtoll(buffv[i], NULL, 0);
-            //g_print ("%d: %s => %d\n", i, buffv[i], module->grid[i]);
-        }
-    }
-    else
-    {
-        module->nviews = 0;
-        sat_log_log(SAT_LOG_LEVEL_ERROR,
-                    _("%s: Unable to allocate memory for grid."), __func__);
-    }
-    g_strfreev(buffv);
+    *cols = xmax;
+    *rows = ymax;
 }
 
 /**
- * \brief Read satellites into memory.
+ * Create module layout and add views.
+ *
+ * It is assumed that module->grid and module->nviews have
+ * coherent values.
+ */
+static void create_module_layout(GtkSatModule * module)
+{
+    GtkWidget      *table;
+    GtkWidget      *view;
+    guint           rows, cols;
+    guint           i;
+
+    /* calculate the number of rows and columns necessary */
+    get_grid_size(module, &rows, &cols);
+    sat_log_log(SAT_LOG_LEVEL_DEBUG,
+                _("%s: Layout has %d columns and %d rows."),
+                __func__, cols, rows);
+
+    table = gtk_grid_new();
+    gtk_grid_set_row_homogeneous(GTK_GRID(table), TRUE);
+    gtk_grid_set_column_homogeneous(GTK_GRID(table), TRUE);
+
+    for (i = 0; i < module->nviews; i++)
+    {
+        /* create the view */
+        view = create_view(module, module->grid[5 * i]);
+
+        /* store a pointer to the view */
+        module->views = g_slist_append(module->views, view);
+
+        /* add view to the grid */
+        gtk_grid_attach(GTK_GRID(table), view,
+                        module->grid[5 * i + 1],                            // left
+                        module->grid[5 * i + 3],                            // top
+                        module->grid[5 * i + 2] - module->grid[5 * i + 1],  // width
+                        module->grid[5 * i + 4] - module->grid[5 * i + 3]); // height
+    }
+
+    gtk_box_pack_start(GTK_BOX(module), table, TRUE, TRUE, 0);
+}
+
+
+/**
+ * Read satellites into memory.
  *
  * This function reads the list of satellites from the configfile and
  * and then adds each satellite to the hash table.
@@ -708,14 +480,209 @@ static void gtk_sat_module_load_sats(GtkSatModule * module)
 }
 
 /**
- * \brief Free satellite data
- * 
- * This function is called automatically for each satellite when
- * the hash table is destroyed.
+ * Update GtkSkyGlance view
+ *
+ * @param module Pointer to the GtkSatModule widget
+ *
+ * This function checks to see if the sky-at-a-glance display needs to be
+ * updated due to time or qth moving. It checks how long ago the GtkSkyGlance
+ * widget was updated and performs an update if necessary. The current timeout
+ * is set to 60 sec. It also checks how far away the qth is from where the
+ * GtkSkyGlance widget was last updated and triggers an update if necessary.
+ * The current distance is set to 1km.
+ *
+ * This is a cheap/lazy implementation of automatic update. Instead of
+ * performing a real update by "moving" the objects on the GtkSkyGlance canvas,
+ * we simply replace the current GtkSkyGlance object with a new one.
+ * Ugly but safe.
+ *
+ * To ensure smooth performance while running in simulated real time with high
+ * throttle value or manual time mode, the caller is responsible for only calling
+ * this function at an appropriate frequency (e.g. every 10 cycle).
  */
-static void gtk_sat_module_free_sat(gpointer sat)
+static void update_skg(GtkSatModule * module)
 {
-    gtk_sat_data_free_sat(SAT(sat));
+    /* update SKG if ~60 seconds have passed or we have moved 1 km */
+    if (G_UNLIKELY(fabs(module->tmgCdnum - module->lastSkgUpd) > 7.0e-4) ||
+        G_UNLIKELY(qth_small_dist(module->qth, module->lastSkgUpdqth) > 1.0))
+    {
+
+        sat_log_log(SAT_LOG_LEVEL_INFO,
+                    _("%s: Updating GtkSkyGlance for %s"),
+                    __func__, module->name);
+
+        gtk_container_remove(GTK_CONTAINER(module->skgwin), module->skg);
+        module->skg =
+            gtk_sky_glance_new(module->satellites, module->qth,
+                               module->tmgCdnum);
+        gtk_container_add(GTK_CONTAINER(module->skgwin), module->skg);
+        gtk_widget_show_all(module->skg);
+
+        module->lastSkgUpd = module->tmgCdnum;
+        qth_small_save(module->qth, &(module->lastSkgUpdqth));
+    }
+}
+
+static void update_header(GtkSatModule * module)
+{
+    gchar          *fmtstr;
+    gchar           buff[TIME_FORMAT_MAX_LENGTH + 1];
+    gchar          *buff2;
+
+    fmtstr = sat_cfg_get_str(SAT_CFG_STR_TIME_FORMAT);
+    daynum_to_str(buff, TIME_FORMAT_MAX_LENGTH, fmtstr, module->tmgCdnum);
+
+    if (module->qth->type == QTH_GPSD_TYPE)
+    {
+        buff2 =
+            g_strdup_printf("%s GPS %0.3f seconds old", buff,
+                            fabs(module->tmgCdnum -
+                                 module->qth->gpsd_update) * (24 * 3600));
+        gtk_label_set_text(GTK_LABEL(module->header), buff2);
+        g_free(buff2);
+    }
+    else
+        gtk_label_set_text(GTK_LABEL(module->header), buff);
+
+    g_free(fmtstr);
+
+    if (module->tmgActive)
+        tmg_update_state(module);
+}
+
+/**
+ * Update a child widget.
+ *
+ * @param child Pointer to the child widget (views)
+ * @param tstamp The current timestamp
+ *
+ * This function is called by the main loop of the GtkSatModule widget for
+ * each view in the layout grid.
+ */
+static void update_child(GtkWidget * child, gdouble tstamp)
+{
+    if (IS_GTK_SAT_LIST(child))
+    {
+        GTK_SAT_LIST(child)->tstamp = tstamp;
+        gtk_sat_list_update(child);
+    }
+
+    else if (IS_GTK_SAT_MAP(child))
+    {
+        GTK_SAT_MAP(child)->tstamp = tstamp;
+        gtk_sat_map_update(child);
+    }
+
+    else if (IS_GTK_POLAR_VIEW(child))
+    {
+        GTK_POLAR_VIEW(child)->tstamp = tstamp;
+        gtk_polar_view_update(child);
+    }
+
+    else if (IS_GTK_SINGLE_SAT(child))
+    {
+        GTK_SINGLE_SAT(child)->tstamp = tstamp;
+        gtk_single_sat_update(child);
+    }
+
+    else if (IS_GTK_EVENT_LIST(child))
+    {
+        GTK_EVENT_LIST(child)->tstamp = tstamp;
+        gtk_event_list_update(child);
+    }
+
+    else
+    {
+        sat_log_log(SAT_LOG_LEVEL_ERROR,
+                    _("%s:%d: Unknown child type"), __FILE__, __LINE__);
+    }
+}
+
+/**
+ * Update a given satellite.
+ *
+ * @param key The hash table key (catnum)
+ * @param val The hash table value (sat_t structure)
+ * @param data User data (the GtkSatModule widget).
+ *
+ * This function updates the tracking data for a given satelite. It is called by
+ * the timeout handler for each element in the hash table.
+ */
+static void gtk_sat_module_update_sat(gpointer key, gpointer val,
+                                      gpointer data)
+{
+    sat_t          *sat;
+    GtkSatModule   *module;
+    gdouble         daynum;
+    gdouble         maxdt;
+
+    (void)key;
+
+    g_return_if_fail((val != NULL) && (data != NULL));
+
+    sat = SAT(val);
+    module = GTK_SAT_MODULE(data);
+    maxdt = (gdouble) sat_cfg_get_int(SAT_CFG_INT_PRED_LOOK_AHEAD);
+
+    /* get current time (real or simulated */
+    daynum = module->tmgCdnum;
+
+    /* update events if the event counter has been reset
+       and the other requirements are fulfilled */
+    if ((GTK_SAT_MODULE(module)->event_count == 0) &&
+        has_aos(sat, module->qth))
+    {
+        /* Note that has_aos may return TRUE for geostationary sats
+           whose orbit deviate from a true-geostat orbit, however,
+           find_aos and find_los will not go beyond the time limit
+           we specify (in those cases they return 0.0 for AOS/LOS times.
+           We use SAT_CFG_INT_PRED_LOOK_AHEAD for upper time limit */
+        sat->aos = find_aos(sat, module->qth, daynum, maxdt);
+        sat->los = find_los(sat, module->qth, daynum, maxdt);
+    }
+    /*
+       Update AOS and LOS for this satellite if it was known and is before
+       the current time.
+
+       daynum is the current time in the module.
+
+       The conditional aos < daynum is merely saying that aos occured
+       in the past. Therefore it cannot be the next event or aos/los
+       for that satellite.
+
+       The conditional aos > 0.0 is a short hand for saying that the
+       aos was successfully computed before. find_aos returns 0.0 when it
+       cannot find an AOS.
+
+       This code should not execute find_aos(los) if the conditional before
+       is triggered as the newly computed aos(los) should either be in
+       the future (aos > daynum) or (aos == 0 ).
+
+       Single sat/list/event/map views all use these values and they
+       should be up to date.
+
+       The above code is still required for dealing with circumstances
+       where the qth moves from someplace where the qth can have an AOS and
+       where qth does not and for satellites in parking orbits where the
+       AOS may be further than maxdt out results in aos==0.0 until the
+       next aos is closer than maxdt. It also prevents the aos from
+       being computed every pass through the module for the parking orbits.
+
+       To be completely correct, when time can move forward and backwards
+       as it can with the time controller, the time the aos/los was
+       computed should be stored and associated with aos/los. That way
+       if daynum <time_computed, the aos can be recomputed as there is
+       no assurance that the current stored aos is the next aos. As a
+       practical matter the above code handles time reversing acceptably
+       for most circumstances.
+     */
+    if (sat->aos > 0 && sat->aos < daynum)
+        sat->aos = find_aos(sat, module->qth, daynum, maxdt);
+
+    if (sat->los > 0 && sat->los < daynum)
+        sat->los = find_los(sat, module->qth, daynum, maxdt);
+
+    predict_calc(sat, module->qth, daynum);
 }
 
 /** Module timeout callback. */
@@ -853,153 +820,283 @@ static gboolean gtk_sat_module_timeout_cb(gpointer module)
 }
 
 /**
- * Update a child widget.
- * \param child Pointer to the child widget (views)
- * \param tstamp The current timestamp
- * 
- * This function is called by the main loop of the GtkSatModule widget for
- * each view in the layout grid.
- */
-static void update_child(GtkWidget * child, gdouble tstamp)
-{
-    if (IS_GTK_SAT_LIST(child))
-    {
-        GTK_SAT_LIST(child)->tstamp = tstamp;
-        gtk_sat_list_update(child);
-    }
-
-    else if (IS_GTK_SAT_MAP(child))
-    {
-        GTK_SAT_MAP(child)->tstamp = tstamp;
-        gtk_sat_map_update(child);
-    }
-
-    else if (IS_GTK_POLAR_VIEW(child))
-    {
-        GTK_POLAR_VIEW(child)->tstamp = tstamp;
-        gtk_polar_view_update(child);
-    }
-
-    else if (IS_GTK_SINGLE_SAT(child))
-    {
-        GTK_SINGLE_SAT(child)->tstamp = tstamp;
-        gtk_single_sat_update(child);
-    }
-
-    else if (IS_GTK_EVENT_LIST(child))
-    {
-        GTK_EVENT_LIST(child)->tstamp = tstamp;
-        gtk_event_list_update(child);
-    }
-
-    else
-    {
-        sat_log_log(SAT_LOG_LEVEL_ERROR,
-                    _("%s:%d: Unknown child type"), __FILE__, __LINE__);
-    }
-}
-
-/**
- * \brief Update a given satellite.
- * \param key The hash table key (catnum)
- * \param val The hash table value (sat_t structure)
- * \param data User data (the GtkSatModule widget).
- *
- * This function updates the tracking data for a given satelite. It is called by
- * the timeout handler for each element in the hash table.
- */
-static void gtk_sat_module_update_sat(gpointer key, gpointer val,
-                                      gpointer data)
-{
-    sat_t          *sat;
-    GtkSatModule   *module;
-    gdouble         daynum;
-    gdouble         maxdt;
-
-    (void)key;                  /* prevent unused parameter compiler warning */
-
-    g_return_if_fail((val != NULL) && (data != NULL));
-
-    sat = SAT(val);
-    module = GTK_SAT_MODULE(data);
-    maxdt = (gdouble) sat_cfg_get_int(SAT_CFG_INT_PRED_LOOK_AHEAD);
-
-    /* get current time (real or simulated */
-    daynum = module->tmgCdnum;
-
-    /* update events if the event counter has been reset
-       and the other requirements are fulfilled */
-    if ((GTK_SAT_MODULE(module)->event_count == 0) &&
-        has_aos(sat, module->qth))
-    {
-        /* Note that has_aos may return TRUE for geostationary sats
-           whose orbit deviate from a true-geostat orbit, however,
-           find_aos and find_los will not go beyond the time limit
-           we specify (in those cases they return 0.0 for AOS/LOS times.
-           We use SAT_CFG_INT_PRED_LOOK_AHEAD for upper time limit */
-        sat->aos = find_aos(sat, module->qth, daynum, maxdt);
-        sat->los = find_los(sat, module->qth, daynum, maxdt);
-    }
-    /*
-       Update AOS and LOS for this satellite if it was known and is before 
-       the current time. 
-
-       daynum is the current time in the module. 
-
-       The conditional aos < daynum is merely saying that aos occured 
-       in the past. Therefore it cannot be the next event or aos/los 
-       for that satellite.
-
-       The conditional aos > 0.0 is a short hand for saying that the 
-       aos was successfully computed before. find_aos returns 0.0 when it 
-       cannot find an AOS. 
-
-       This code should not execute find_aos(los) if the conditional before 
-       is triggered as the newly computed aos(los) should either be in 
-       the future (aos > daynum) or (aos == 0 ).
-
-       Single sat/list/event/map views all use these values and they 
-       should be up to date.
-
-       The above code is still required for dealing with circumstances 
-       where the qth moves from someplace where the qth can have an AOS and 
-       where qth does not and for satellites in parking orbits where the 
-       AOS may be further than maxdt out results in aos==0.0 until the 
-       next aos is closer than maxdt. It also prevents the aos from 
-       being computed every pass through the module for the parking orbits.
-
-       To be completely correct, when time can move forward and backwards 
-       as it can with the time controller, the time the aos/los was 
-       computed should be stored and associated with aos/los. That way 
-       if daynum <time_computed, the aos can be recomputed as there is 
-       no assurance that the current stored aos is the next aos. As a 
-       practical matter the above code handles time reversing acceptably 
-       for most circumstances. 
-     */
-    if (sat->aos > 0 && sat->aos < daynum)
-        sat->aos = find_aos(sat, module->qth, daynum, maxdt);
-
-    if (sat->los > 0 && sat->los < daynum)
-        sat->los = find_los(sat, module->qth, daynum, maxdt);
-
-    predict_calc(sat, module->qth, daynum);
-}
-
-/**
- * \brief Module options.
+ * Module options.
  *
  * Invoke module-wide popup menu
  */
 static void gtk_sat_module_popup_cb(GtkWidget * button, gpointer data)
 {
-    (void)button;               /* prevent unused parameter compiler warning */
+    (void)button;
     gtk_sat_module_popup(GTK_SAT_MODULE(data));
 }
 
 /**
- * \brief Close module.
- * \param button The button widget that received the signal.
- * \param data Pointer the GtkSatModule widget, which should be destroyed.
+ * Read moule configuration data.
+ *
+ * @param module The GtkSatModule to which the configuration will be applied.
+ * @param cfgfile The configuration file.
+ */
+static void gtk_sat_module_read_cfg_data(GtkSatModule * module,
+                                         const gchar * cfgfile)
+{
+    gchar          *buffer = NULL;
+    gchar          *qthfile;
+    gchar          *confdir;
+    gchar         **buffv;
+    guint           length, i;
+    GError         *error = NULL;
+
+    module->cfgdata = g_key_file_new();
+    g_key_file_set_list_separator(module->cfgdata, ';');
+
+    /* Bail out with error message if data can not be read */
+    if (!g_key_file_load_from_file(module->cfgdata, cfgfile,
+                                   G_KEY_FILE_KEEP_COMMENTS, &error))
+    {
+        g_key_file_free(module->cfgdata);
+        module->cfgdata = NULL;
+        sat_log_log(SAT_LOG_LEVEL_ERROR,
+                    _("%s: Could not load config data from %s (%s)."),
+                    __func__, cfgfile, error->message);
+
+        g_clear_error(&error);
+
+        return;
+    }
+
+    /* debug message */
+    sat_log_log(SAT_LOG_LEVEL_DEBUG,
+                _("%s: Reading configuration from %s"), __func__, cfgfile);
+
+    /* set module name */
+    buffer = g_path_get_basename(cfgfile);
+    buffv = g_strsplit(buffer, ".mod", 0);
+    module->name = g_strdup(buffv[0]);
+    g_free(buffer);
+    g_strfreev(buffv);
+
+    /* get qth file */
+    buffer = mod_cfg_get_str(module->cfgdata,
+                             MOD_CFG_GLOBAL_SECTION,
+                             MOD_CFG_QTH_FILE_KEY, SAT_CFG_STR_DEF_QTH);
+
+    confdir = get_user_conf_dir();
+    qthfile = g_strconcat(confdir, G_DIR_SEPARATOR_S, buffer, NULL);
+
+    /* load QTH data */
+    if (!qth_data_read(qthfile, module->qth))
+    {
+        /* QTH file was not found for some reason */
+        g_free(buffer);
+        g_free(qthfile);
+
+        /* remove cfg key */
+        g_key_file_remove_key(module->cfgdata,
+                              MOD_CFG_GLOBAL_SECTION,
+                              MOD_CFG_QTH_FILE_KEY, NULL);
+
+        /* save modified cfg data to file */
+        mod_cfg_save(module->name, module->cfgdata);
+
+        /* try SAT_CFG_STR_DEF_QTH */
+        buffer = sat_cfg_get_str(SAT_CFG_STR_DEF_QTH);
+        qthfile = g_strconcat(confdir, G_DIR_SEPARATOR_S, buffer, NULL);
+
+        if (!qth_data_read(qthfile, module->qth))
+        {
+            sat_log_log(SAT_LOG_LEVEL_ERROR,
+                        _
+                        ("%s: Can not load default QTH file %s; using built-in defaults"),
+                        __func__, buffer);
+
+            /* settings are really screwed up; we need some safe values here */
+            qth_safe(module->qth);
+        }
+    }
+
+    g_free(buffer);
+    g_free(confdir);
+    g_free(qthfile);
+
+    /* get timeout value */
+    module->timeout = mod_cfg_get_int(module->cfgdata,
+                                      MOD_CFG_GLOBAL_SECTION,
+                                      MOD_CFG_TIMEOUT_KEY,
+                                      SAT_CFG_INT_MODULE_TIMEOUT);
+
+    /* get grid layout configuration (introduced in 1.2) */
+    buffer = mod_cfg_get_str(module->cfgdata,
+                             MOD_CFG_GLOBAL_SECTION,
+                             MOD_CFG_GRID, SAT_CFG_STR_MODULE_GRID);
+
+    /* convert to an integer list */
+    buffv = g_strsplit(buffer, ";", 0);
+    length = g_strv_length(buffv);
+    if ((length == 0) || (length % 5 != 0))
+    {
+        /* the grid configuration is bogus; override with global default */
+        sat_log_log(SAT_LOG_LEVEL_ERROR,
+                    _("%s: Module layout is invalid: %s. Using default."),
+                    __func__, buffer);
+        g_free(buffer);
+        g_strfreev(buffv);
+
+        buffer = sat_cfg_get_str_def(SAT_CFG_STR_MODULE_GRID);
+        buffv = g_strsplit(buffer, ";", 0);
+        length = g_strv_length(buffv);
+    }
+
+    /* make a debug log entry */
+    sat_log_log(SAT_LOG_LEVEL_DEBUG,
+                _("%s: GRID(%d): %s"), __func__, length, buffer);
+    g_free(buffer);
+
+    /* number of views: we have five numbers per view (type,left,right,top,bottom) */
+    module->nviews = length / 5;
+    module->grid = g_try_new0(guint, length);
+
+    /* if we cannot allocate memory for the grid zero the views out and log */
+    if (module->grid != NULL)
+    {
+        /* convert chars to integers */
+        for (i = 0; i < length; i++)
+        {
+            module->grid[i] = (gint) g_ascii_strtoll(buffv[i], NULL, 0);
+            //g_print ("%d: %s => %d\n", i, buffv[i], module->grid[i]);
+        }
+    }
+    else
+    {
+        module->nviews = 0;
+        sat_log_log(SAT_LOG_LEVEL_ERROR,
+                    _("%s: Unable to allocate memory for grid."), __func__);
+    }
+    g_strfreev(buffv);
+}
+
+/**
+ * Create a new GtkSatModule widget.
+ *
+ * @param cfgfile The name of the configuration file (.mod)
+ *
+ * @bug Program goes into infinite loop when there is something
+ *      wrong with cfg file.
+ */
+GtkWidget *gtk_sat_module_new(const gchar * cfgfile)
+{
+    GtkSatModule   *module;
+    GtkWidget      *butbox;
+
+    /* Read configuration data.
+       If cfgfile is not existing or is NULL, start the wizard
+       in order to create a new configuration.
+     */
+    if ((cfgfile == NULL) || !g_file_test(cfgfile, G_FILE_TEST_EXISTS))
+    {
+
+        sat_log_log(SAT_LOG_LEVEL_ERROR,
+                    _("%s: Module %s is not valid."), __func__, cfgfile);
+
+        return NULL;
+    }
+
+    /* create module widget */
+    module = GTK_SAT_MODULE(g_object_new(GTK_TYPE_SAT_MODULE, NULL));
+    g_object_set(module, "orientation", GTK_ORIENTATION_VERTICAL, NULL);
+
+    /* load configuration; note that this will also set the module name */
+    gtk_sat_module_read_cfg_data(module, cfgfile);
+
+    /*check that we loaded some reasonable data */
+    if (module->cfgdata == NULL)
+    {
+        sat_log_log(SAT_LOG_LEVEL_ERROR,
+                    _("%s: Module %s has problems."), __func__, cfgfile);
+
+        return NULL;
+    }
+    /*initialize the qth engine and get position */
+    qth_data_update_init(module->qth);
+
+    /* module state */
+    if ((g_key_file_has_key(module->cfgdata,
+                            MOD_CFG_GLOBAL_SECTION,
+                            MOD_CFG_STATE, NULL)) &&
+        sat_cfg_get_bool(SAT_CFG_BOOL_MOD_STATE))
+    {
+        module->state = g_key_file_get_integer(module->cfgdata,
+                                               MOD_CFG_GLOBAL_SECTION,
+                                               MOD_CFG_STATE, NULL);
+    }
+    else
+    {
+        module->state = GTK_SAT_MOD_STATE_DOCKED;
+    }
+
+    /* initialise time keeping vars to current time */
+    module->rtNow = get_current_daynum();
+    module->rtPrev = get_current_daynum();
+    module->tmgPdnum = get_current_daynum();
+    module->tmgCdnum = get_current_daynum();
+
+    /* load satellites */
+    gtk_sat_module_load_sats(module);
+
+    /* create buttons */
+    module->popup_button = gpredict_mini_mod_button("gpredict-mod-popup.png",
+                                _("Module options / shortcuts"));
+    g_signal_connect(module->popup_button, "clicked",
+                     G_CALLBACK(gtk_sat_module_popup_cb), module);
+
+    module->close_button = gpredict_mini_mod_button("gpredict-mod-close.png",
+                                 _("Close this module."));
+    g_signal_connect(module->close_button, "clicked",
+                     G_CALLBACK(gtk_sat_module_close_cb), module);
+
+    /* create header; header should not be updated more than
+       once pr. second.
+     */
+    module->header = gtk_label_new(NULL);
+    module->head_count = 0;
+    module->head_timeout = module->timeout > 1000 ? 1 :
+        (guint) floor(1000 / module->timeout);
+
+    /* Event timeout
+       Update every minute FIXME: user configurable
+     */
+    module->event_timeout = module->timeout > 60000 ? 1 :
+         (guint) floor(60000 / module->timeout);
+    /* force update the first time */
+    module->event_count = module->event_timeout;
+
+    butbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_box_pack_start(GTK_BOX(butbox),
+                       module->header, FALSE, FALSE, 10);
+    gtk_box_pack_end(GTK_BOX(butbox),
+                     module->close_button, FALSE, FALSE, 0);
+    gtk_box_pack_end(GTK_BOX(butbox),
+                     module->popup_button, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(module), butbox, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(module),
+                       gtk_separator_new(GTK_ORIENTATION_HORIZONTAL),
+                       FALSE, FALSE, 0);
+
+    create_module_layout(module);
+    gtk_widget_show_all(GTK_WIDGET(module));
+
+    /* start timeout */
+    module->timerid = g_timeout_add(module->timeout, gtk_sat_module_timeout_cb,
+                                    module);
+
+    return GTK_WIDGET(module);
+}
+
+/**
+ * Close module.
+ *
+ * @param button The button widget that received the signal.
+ * @param data Pointer the GtkSatModule widget, which should be destroyed.
  *
  * This function is called when the user clicks on the "close" minibutton.
  * The functions checks the state of the module. If the module is docked
@@ -1017,7 +1114,7 @@ void gtk_sat_module_close_cb(GtkWidget * button, gpointer data)
     gchar          *name;
     gint            retcode;
 
-    (void)button;               /* prevent unused parameter compiler warning */
+    (void)button;
 
     name = g_strdup(module->name);
 
@@ -1118,9 +1215,10 @@ void gtk_sat_module_close_cb(GtkWidget * button, gpointer data)
 }
 
 /**
- * \brief Configure module.
- * \param button The button widget that received the signal.
- * \param data Pointer the GtkSatModule widget, which should be reconfigured
+ * Configure module.
+ *
+ * @param button The button widget that received the signal.
+ * @param data Pointer the GtkSatModule widget, which should be reconfigured
  *
  * This function is called when the user clicks on the "configure" minibutton.
  * The function incokes the mod_cfg_edit funcion, which has the same look and feel
@@ -1140,7 +1238,7 @@ void gtk_sat_module_config_cb(GtkWidget * button, gpointer data)
     gtk_sat_mod_state_t laststate;
     gint            w, h;
 
-    (void)button;               /* prevent unused parameter compiler warning */
+    (void)button;
 
     if (module->win != NULL)
         toplevel = module->win;
@@ -1278,46 +1376,50 @@ void gtk_sat_module_config_cb(GtkWidget * button, gpointer data)
     g_free(name);
 }
 
-static void update_header(GtkSatModule * module)
-{
-    gchar          *fmtstr;
-    gchar           buff[TIME_FORMAT_MAX_LENGTH + 1];
-    gchar          *buff2;
-
-    fmtstr = sat_cfg_get_str(SAT_CFG_STR_TIME_FORMAT);
-    daynum_to_str(buff, TIME_FORMAT_MAX_LENGTH, fmtstr, module->tmgCdnum);
-
-    if (module->qth->type == QTH_GPSD_TYPE)
-    {
-        buff2 =
-            g_strdup_printf("%s GPS %0.3f seconds old", buff,
-                            fabs(module->tmgCdnum -
-                                 module->qth->gpsd_update) * (24 * 3600));
-        gtk_label_set_text(GTK_LABEL(module->header), buff2);
-        g_free(buff2);
-    }
-    else
-        gtk_label_set_text(GTK_LABEL(module->header), buff);
-
-    g_free(fmtstr);
-
-    if (module->tmgActive)
-        tmg_update_state(module);
-}
-
 static gboolean empty(gpointer key, gpointer val, gpointer data)
 {
-    (void)key;                  /* prevent unused parameter compiler warning */
-    (void)val;                  /* prevent unused parameter compiler warning */
-    (void)data;                 /* prevent unused parameter compiler warning */
+    (void)key;
+    (void)val;
+    (void)data;
 
     /* TRUE => sat removed from hash table */
     return TRUE;
 }
 
+/** Reload satellites in view */
+static void reload_sats_in_child(GtkWidget * widget, GtkSatModule * module)
+{
+    if (IS_GTK_SINGLE_SAT(G_OBJECT(widget)))
+    {
+        gtk_single_sat_reload_sats(widget, module->satellites);
+    }
+    else if (IS_GTK_POLAR_VIEW(widget))
+    {
+        gtk_polar_view_reload_sats(widget, module->satellites);
+    }
+    else if (IS_GTK_SAT_MAP(widget))
+    {
+        gtk_sat_map_reload_sats(widget, module->satellites);
+    }
+    else if (IS_GTK_SAT_LIST(widget))
+    {
+        /* NOP */
+    }
+    else if (IS_GTK_EVENT_LIST(widget))
+    {
+        /* NOP */
+    }
+    else
+    {
+        sat_log_log(SAT_LOG_LEVEL_ERROR,
+                    _("%s:%d: Unknown child type"), __FILE__, __LINE__);
+    }
+}
+
 /**
- * \brief Reload satellites.
- * \param module Pointer to a GtkSatModule widget.
+ * Reload satellites.
+ *
+ * @param module Pointer to a GtkSatModule widget.
  *
  * This function is used to reload the satellites in a module. This is can be
  * useful when:
@@ -1363,40 +1465,6 @@ void gtk_sat_module_reload_sats(GtkSatModule * module)
 
     /* unlock module */
     g_mutex_unlock(&module->busy);
-}
-
-/** Reload satellites in view */
-static void reload_sats_in_child(GtkWidget * widget, GtkSatModule * module)
-{
-    if (IS_GTK_SINGLE_SAT(G_OBJECT(widget)))
-    {
-        gtk_single_sat_reload_sats(widget, module->satellites);
-    }
-
-    else if (IS_GTK_POLAR_VIEW(widget))
-    {
-        gtk_polar_view_reload_sats(widget, module->satellites);
-    }
-
-    else if (IS_GTK_SAT_MAP(widget))
-    {
-        gtk_sat_map_reload_sats(widget, module->satellites);
-    }
-
-    else if (IS_GTK_SAT_LIST(widget))
-    {
-        /* NOP */
-    }
-    else if (IS_GTK_EVENT_LIST(widget))
-    {
-        /* NOP */
-    }
-
-    else
-    {
-        sat_log_log(SAT_LOG_LEVEL_ERROR,
-                    _("%s:%d: Unknown child type"), __FILE__, __LINE__);
-    }
 }
 
 /** Select a new satellite */
@@ -1448,141 +1516,15 @@ void gtk_sat_module_select_sat(GtkSatModule * module, gint catnum)
 }
 
 /**
- * \brief Re-configure module.
- * \param module The module.
- * \param local Flag indicating whether reconfiguration is requested from 
+ * Re-configure module.
+ *
+ * @param module The module.
+ * @param local Flag indicating whether reconfiguration is requested from 
  *              local configuration dialog.
  *
  */
 void gtk_sat_module_reconf(GtkSatModule * module, gboolean local)
 {
-    (void)module;               /* prevent unused parameter compiler warning */
-    (void)local;                /* prevent unused parameter compiler warning */
-}
-
-/**
- * \brief Calculate the layout grid size.
- * \param module Pointer to the GtkSatModule widget.
- * \param rows Return value for number of rows
- * \param cols Return value for number of columns
- *
- * It is assumed that module->grid and module->nviews have chierent values.
- */
-static void get_grid_size(GtkSatModule * module, guint * rows, guint * cols)
-{
-    guint           i;
-    guint           xmax = 0;
-    guint           ymax = 0;
-
-    for (i = 0; i < module->nviews; i++)
-    {
-        xmax = MAX(xmax, module->grid[5 * i + 2]);
-        ymax = MAX(ymax, module->grid[5 * i + 4]);
-    }
-
-    *cols = xmax;
-    *rows = ymax;
-}
-
-/**
- * \brief Update GtkSkyGlance view
- * \param module Pointer to the GtkSatModule widget
- * 
- * This function checks to see if the sky-at-a-glance display needs to be updated 
- * due to time or qth moving. It checks how long ago the GtkSkyGlance widget was 
- * updated and performs an update if necessary. The current timeout is set to 60 sec.
- * It also checks how far away the qth is from where the GtkSkyGlance 
- * widget was last updated and triggers an update if necessary. The current 
- * distance is set to 1km.
- * 
- * This is a cheap/lazy implementation of automatic update. Instead of
- * performing a real update by "moving" the objects on the GtkSkyGlance canvas,
- * we simply replace the current GtkSkyGlance object with a new one.
- * Ugly but safe.
- * 
- * To ensure smooth performance while running in simulated real time with high
- * throttle value or manual time mode, the caller is responsible for only calling
- * this function at an appropriate frequency (e.g. every 10 cycle).
- */
-static void update_skg(GtkSatModule * module)
-{
-    /* update SKG if ~60 seconds have passed or we have moved 1 km */
-    if (G_UNLIKELY(fabs(module->tmgCdnum - module->lastSkgUpd) > 7.0e-4) ||
-        G_UNLIKELY(qth_small_dist(module->qth, module->lastSkgUpdqth) > 1.0))
-    {
-
-        sat_log_log(SAT_LOG_LEVEL_INFO,
-                    _("%s: Updating GtkSkyGlance for %s"),
-                    __func__, module->name);
-
-        gtk_container_remove(GTK_CONTAINER(module->skgwin), module->skg);
-        module->skg =
-            gtk_sky_glance_new(module->satellites, module->qth,
-                               module->tmgCdnum);
-        gtk_container_add(GTK_CONTAINER(module->skgwin), module->skg);
-        gtk_widget_show_all(module->skg);
-
-        module->lastSkgUpd = module->tmgCdnum;
-        qth_small_save(module->qth, &(module->lastSkgUpdqth));
-    }
-}
-
-/** Check and update autotrack target */
-static void update_autotrack(GtkSatModule * module)
-{
-    GList          *satlist = NULL;
-    GList          *iter;
-    sat_t          *sat = NULL;
-    guint           i, n;
-    double          next_aos;
-    gint            next_sat;
-
-    if (module->target > 0)
-        sat = g_hash_table_lookup(module->satellites, &module->target);
-
-    /* do nothing if current target is still above horizon */
-    if (sat != NULL && sat->el > 0.0)
-        return;
-
-    /* set target to satellite with next AOS */
-    satlist = g_hash_table_get_values(module->satellites);
-    iter = satlist;
-    n = g_list_length(satlist);
-    if (n == 0)
-        return;
-
-    next_aos = module->tmgCdnum + 10.f; /* hope there is AOS within 10 days */
-    next_sat = module->target;
-
-    i = 0;
-    while (i++ < n)
-    {
-        sat = (sat_t *) iter->data;
-
-        /* if sat is above horizon, select it and we are done */
-        if (sat->el > 0.0)
-        {
-            next_sat = sat->tle.catnr;
-            break;
-        }
-
-        /* we have a candidate if AOS is in the future */
-        if (sat->aos > module->tmgCdnum && sat->aos < next_aos)
-        {
-            next_aos = sat->aos;
-            next_sat = sat->tle.catnr;
-        }
-
-        iter = iter->next;
-    }
-
-    if (next_sat != module->target)
-    {
-        sat_log_log(SAT_LOG_LEVEL_INFO,
-                    _("Autotrack: Changing target satellite %d -> %d"),
-                    module->target, next_sat);
-        gtk_sat_module_select_sat(module, next_sat);
-    }
-
-    g_list_free(satlist);
+    (void)module;
+    (void)local;
 }

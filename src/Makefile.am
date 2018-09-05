@@ -6,19 +6,25 @@ AM_CPPFLAGS = \
 	@PACKAGE_CFLAGS@ -I.. \
 	-DPACKAGE_DATA_DIR=\""$(datadir)/gpredict"\" \
 	-DPACKAGE_PIXMAPS_DIR=\""$(datadir)/pixmaps/gpredict"\" \
-	-DPACKAGE_LOCALE_DIR=\""$(prefix)/share/locale"\"
+	-DPACKAGE_LOCALE_DIR=\""$(prefix)/share/locale"\" \
+	-DGTK_DISABLE_SINGLE_INCLUDES \
+	-DG_DISABLE_DEPRECATED \
+	-DGDK_DISABLE_DEPRECATED \
+	-DGSEAL_ENABLE
 
-## We have to disable these for now because GtkTooltips have been
-## deprecated in Gtk+ 2.12
-##	-DG_DISABLE_DEPRECATED \
-##	-DGDK_DISABLE_DEPRECATED \
-##	-DGDK_PIXBUF_DISABLE_DEPRECATED \
-##	-DGTK_DISABLE_DEPRECATED \
+## 	-DGTK_DISABLE_DEPRECATED \
 
+## Added while preparing for Gtk+ 3 migration:
+##  -DGTK_DISABLE_SINGLE_INCLUDES
+##  -DG_DISABLE_DEPRECATED
+##  -DGDK_DISABLE_DEPRECATED
+##  -DGTK_DISABLE_DEPRECATED
+##  -DGSEAL_ENABLE
 
 bin_PROGRAMS = gpredict
 
 gpredict_SOURCES = \
+	nxjson/nxjson.c nxjson/nxjson.h \
     sgpsdp/sgp4sdp4.c \
     sgpsdp/sgp4sdp4.h \
     sgpsdp/sgp_in.c \
@@ -30,7 +36,6 @@ gpredict_SOURCES = \
     compat.c compat.h config-keys.h \
     first-time.c first-time.h \
     gpredict-help.c gpredict-help.h \
-    gpredict-url-hook.c gpredict-url-hook.h \
     gpredict-utils.c gpredict-utils.h \
     gtk-azel-plot.c gtk-azel-plot.h \
     gtk-event-list.c gtk-event-list.h \
@@ -44,7 +49,6 @@ gpredict_SOURCES = \
     gtk-rot-knob.c gtk-rot-knob.h \
     gtk-sat-data.c gtk-sat-data.h \
     gtk-sat-list.c gtk-sat-list.h \
-    gtk-sat-list-col-sel.c gtk-sat-list-col-sel.h \
     gtk-sat-list-popup.c gtk-sat-list-popup.h \
     gtk-sat-map.c gtk-sat-map.h \
     gtk-sat-map-popup.c gtk-sat-map-popup.h \
@@ -76,6 +80,7 @@ gpredict_SOURCES = \
     radio-conf.c radio-conf.h \
     rotor-conf.c rotor-conf.h \
     trsp-conf.c trsp-conf.h \
+    trsp-update.c trsp-update.h \
     sat-cfg.c sat-cfg.h \
     sat-info.c sat-info.h \
     sat-log.c sat-log.h \
@@ -89,10 +94,8 @@ gpredict_SOURCES = \
     sat-pref-qth-editor.c sat-pref-qth-editor.h \
     sat-pref-tle.c sat-pref-tle.h \
     sat-pref-debug.c sat-pref-debug.h \
-    sat-pref-help.c sat-pref-help.h \
     sat-pref-modules.c sat-pref-modules.h \
     sat-pref-layout.c sat-pref-layout.h \
-    sat-pref-layout-utils.c sat-pref-layout-utils.h \
     sat-pref-refresh.c sat-pref-refresh.h \
     sat-pref-map-view.c sat-pref-map-view.h \
     sat-pref-list-view.c sat-pref-list-view.h \
@@ -113,10 +116,7 @@ gpredict_SOURCES = \
     time-tools.c time-tools.h \
     tle-tools.c tle-tools.h \
     tle-update.c tle-update.h \
-    sat-debugger.c sat-debugger.h \
     strnatcmp.c strnatcmp.h
-
-
 
 ##gpredict_LDADD = ./sgpsdp/libsgp4sdp4.a @PACKAGE_LIBS@
 gpredict_LDADD = @PACKAGE_LIBS@

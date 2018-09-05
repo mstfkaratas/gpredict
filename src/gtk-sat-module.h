@@ -1,43 +1,18 @@
-/* -*- Mode: C; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/*
-    Gpredict: Real-time satellite tracking and orbit prediction program
-
-    Copyright (C)  2001-2013  Alexandru Csete, OZ9AEC.
-
-    Authors: Alexandru Csete <oz9aec@gmail.com>
-    Charles Suprin <hamaa1vs@gmail.com>
-
-    Comments, questions and bugreports should be submitted via
-    http://sourceforge.net/projects/gpredict/
-    More details can be found at the project home page:
-
-            http://gpredict.oz9aec.net/
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, visit http://www.fsf.org/
-*/
 #ifndef __GTK_SAT_MODULE_H__
 #define __GTK_SAT_MODULE_H__ 1
 
-#include <glib.h>
 #include <gdk/gdk.h>
+#include <glib.h>
 #include <gtk/gtk.h>
-#include "gtk-sat-data.h"
-#include "qth-data.h"
 
+#include "qth-data.h"
+#include "gtk-sat-data.h"
+
+/* *INDENT-OFF* */
 #ifdef __cplusplus
 extern "C" {
-#endif /* __cplusplus */
+#endif
+/* *INDENT-ON* */
 
 /** The state of a module */
 typedef enum {
@@ -45,16 +20,6 @@ typedef enum {
     GTK_SAT_MOD_STATE_WINDOW,   /*!< The module is in it's own window. */
     GTK_SAT_MOD_STATE_FULLSCREEN        /*!< The module is in FULLSCREEN mode :-) */
 } gtk_sat_mod_state_t;
-
-
-/** Module layout */
-//typedef enum {
-//    GTK_SAT_MOD_LAYOUT_1 = 0, /*!< one view */
-//    GTK_SAT_MOD_LAYOUT_2,     /*!< Two views, one above the other */
-//    GTK_SAT_MOD_LAYOUT_3,     /*!< Three views, big one on top, two small one at bottom */
-//    GTK_SAT_MOD_LAYOUT_4      /*!< Three views, big one on bottom, small ones on top */
-//} gtk_sat_mod_layout_t;
-
 
 /** View types */
 typedef enum {
@@ -67,24 +32,20 @@ typedef enum {
 } gtk_sat_mod_view_t;
 
 
-
 #define GTK_TYPE_SAT_MODULE         (gtk_sat_module_get_type ())
 #define GTK_SAT_MODULE(obj)         G_TYPE_CHECK_INSTANCE_CAST (obj,\
                                     gtk_sat_module_get_type (),     \
                                     GtkSatModule)
-
 #define GTK_SAT_MODULE_CLASS(klass) G_TYPE_CHECK_CLASS_CAST (klass,\
-gtk_sat_module_get_type (),\
-GtkSatModuleClass)
-
+                                    gtk_sat_module_get_type (),\
+                                    GtkSatModuleClass)
 #define IS_GTK_SAT_MODULE(obj)      G_TYPE_CHECK_INSTANCE_TYPE (obj, gtk_sat_module_get_type ())
-
 
 typedef struct _gtk_sat_module GtkSatModule;
 typedef struct _GtkSatModuleClass GtkSatModuleClass;
 
 struct _gtk_sat_module {
-    GtkVBox         vbox;
+    GtkBox          vbox;
 
     gchar          *name;       /*!< The module name */
 
@@ -160,13 +121,11 @@ struct _gtk_sat_module {
 };
 
 struct _GtkSatModuleClass {
-    GtkVBoxClass    parent_class;
+    GtkBoxClass     parent_class;
 };
-
 
 GType           gtk_sat_module_get_type(void);
 GtkWidget      *gtk_sat_module_new(const gchar * cfgfile);
-
 
 void            gtk_sat_module_close_cb(GtkWidget * button, gpointer data);
 void            gtk_sat_module_config_cb(GtkWidget * button, gpointer data);
@@ -177,7 +136,10 @@ void            gtk_sat_module_select_sat(GtkSatModule * module, gint catnum);
 
 void            gtk_sat_module_fix_size(GtkWidget * module);
 
+/* *INDENT-OFF* */
 #ifdef __cplusplus
 }
-#endif /* __cplusplus */
+#endif
+/* *INDENT-ON* */
+
 #endif /* __GTK_SAT_MODULE_H__ */

@@ -1,8 +1,7 @@
-/* -*- Mode: C; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /*
     Gpredict: Real-time satellite tracking and orbit prediction program
 
-    Copyright (C)  2001-2009  Alexandru Csete, OZ9AEC.
+    Copyright (C)  2001-2017  Alexandru Csete, OZ9AEC.
 
     Authors: Alexandru Csete <oz9aec@gmail.com>
 
@@ -29,20 +28,13 @@
 #define SAVE_PASS_H 1
 
 #include <gtk/gtk.h>
-#include "sat-pass-dialogs.h"
-#include "predict-tools.h"
+
 #include "gtk-sat-data.h"
+#include "predict-tools.h"
+#include "sat-pass-dialogs.h"
 
 
-/** \brief Save format */
-typedef enum {
-     SAVE_FORMAT_TXT = 0,   /*!< Save in plain text format (data only) */
-     //SAVE_FORMAT_HTML,      /*!< HTML format (data and graphics) */
-} save_format_t;
-
-
-void save_pass   (GtkWidget *parent);
-void save_passes (GtkWidget *parent);
-
+void            save_pass(GtkWidget * parent);
+void            save_passes(GtkWidget * parent);
 
 #endif

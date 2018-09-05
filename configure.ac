@@ -1,13 +1,13 @@
 AC_INIT([gpredict],
         m4_esyscmd([./git-version-gen .tarball-version]),
-        [gpredict-discussion@lists.sourceforge.net])
+        [https://community.libre.space/c/gpredict])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR(src/main.c)
 AM_CONFIG_HEADER(build-config.h)
-AM_INIT_AUTOMAKE([dist-bzip2 no-dist-gzip 1.6])
+AM_INIT_AUTOMAKE([subdir-objects dist-bzip2 no-dist-gzip 1.6])
 
-AM_MAINTAINER_MODE
-AC_PROG_INTLTOOL([0.21])
+# ensure Makefiles are updated when Makefile.am is modified
+AM_MAINTAINER_MODE([enable])
 
 # kernel style compile messages
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
@@ -16,12 +16,13 @@ m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 AC_PROG_CC
 AC_ISC_POSIX
 AC_HEADER_STDC
+AC_PROG_INTLTOOL([0.21])
 AM_PROG_LIBTOOL
 
 AC_CHECK_HEADERS([sys/time.h unistd.h getopt.h])
 
 if test "${ac_cv_c_compiler_gnu}" = "yes"; then
-  CFLAGS="${CFLAGS} -Wall"
+  CFLAGS="${CFLAGS} -Wall -Wextra -std=c11 -pedantic"
 fi
 
 # check for libm
@@ -44,11 +45,11 @@ else
 fi
 
 # check for goocanvas (depends on gtk and glib)
-if pkg-config --atleast-version=0.15 goocanvas; then
-    CFLAGS="$CFLAGS `pkg-config --cflags goocanvas`"
-    LIBS="$LIBS `pkg-config --libs goocanvas`"
+if pkg-config --atleast-version=2.0 goocanvas-2.0; then
+    CFLAGS="$CFLAGS `pkg-config --cflags goocanvas-2.0`"
+    LIBS="$LIBS `pkg-config --libs goocanvas-2.0`"
 else
-    AC_MSG_ERROR(Gpredict requires libgoocanvas-dev 0.15 or later)
+    AC_MSG_ERROR(Gpredict requires libgoocanvas-2.0-dev)
 fi
 
 # check for libgps (optional)
@@ -66,7 +67,7 @@ AC_SUBST(PACKAGE_LIBS)
 
 # Add the languages which your application supports here.
 # Note that other progs only have ALL_LINGUAS and AM_GLIB_GNU_GETTEXT
-ALL_LINGUAS="cs da de en_GB en_US es fi fr id it lt ru th uk"
+ALL_LINGUAS="cs da de el en_GB en_US es fi fr id it lt ru th uk"
 GETTEXT_PACKAGE=gpredict
 AC_SUBST(GETTEXT_PACKAGE)
 AM_GLIB_GNU_GETTEXT
@@ -90,9 +91,9 @@ AM_CONDITIONAL(UPDATE_CACHES, test x"$enable_caches" = "xyes")
 GLIB_V=`pkg-config --modversion glib-2.0`
 GIO_V=`pkg-config --modversion gio-2.0`
 GTHR_V=`pkg-config --modversion gthread-2.0`
-GDK_V=`pkg-config --modversion gdk-2.0`
-GTK_V=`pkg-config --modversion gtk+-2.0`
-GOOC_V=`pkg-config --modversion goocanvas`
+GDK_V=`pkg-config --modversion gdk-3.0`
+GTK_V=`pkg-config --modversion gtk+-3.0`
+GOOC_V=`pkg-config --modversion goocanvas-2.0`
 CURL_V=`pkg-config --modversion libcurl`
 if test "$havelibgps" = true ; then
    GPS_V=`pkg-config --modversion libgps`
@@ -113,11 +114,11 @@ src/sgpsdp/Makefile
 src/sgpsdp/TR/Makefile
 pixmaps/Makefile
 pixmaps/maps/Makefile
+pixmaps/logos/Makefile
 pixmaps/icons/Makefile
 data/Makefile
 data/desktop/Makefile
 data/satdata/Makefile
-data/trsp/Makefile
 po/Makefile.in
 ])
 
@@ -131,7 +132,7 @@ echo Gthread version.... : $GTHR_V
 echo Gdk version........ : $GDK_V
 echo Gtk+ version....... : $GTK_V
 echo GooCanvas version.. : $GOOC_V
-echo Libcurl version..... : $CURL_V
+echo Libcurl version.... : $CURL_V
 if test "$havelibgps" = true ; then
    echo Libgps version..... : $GPS_V
 fi

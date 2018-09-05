@@ -18,7 +18,8 @@
  *
  *   Ported to C by: Neoklis Kyriazis  April 9  2001
  */
-
+#define _POSIX_C_SOURCE     1  // gmtime_r()
+#include <time.h>
 #include "sgp4sdp4.h"
 
 /* The function Julian_Date_of_Epoch returns the Julian Date of     */
@@ -251,8 +252,8 @@ gmtime_r (const time_t *timer, struct tm *result)
    if (local_result == NULL || result == NULL)
      return NULL;
 
-   memcpy (result, local_result, sizeof (result));
-   return result;
+   return memcpy(result, local_result, sizeof(*result));
+
 } /*Procedure gmtime_r*/
 #endif
 
