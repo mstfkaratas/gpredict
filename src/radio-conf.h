@@ -36,7 +36,7 @@
 typedef enum {
     RIG_TYPE_RX = 0,            /*!< Rig can only be used as receiver */
     RIG_TYPE_TX,                /*!< Rig can only be used as transmitter */
-    RIG_TYPE_TRX,               /*!< Rig can be used as RX/TX (simplex only) */
+    RIG_TYPE_TRX,               /*!< Rig can be used as RX/TX (half-duplex only) */
     RIG_TYPE_DUPLEX,            /*!< Rig is a full duplex radio, e.g. IC910 */
     RIG_TYPE_TOGGLE_AUTO,       /*!< Special mode for FT-817, 857 and 897 using auto T/R switch */
     RIG_TYPE_TOGGLE_MAN         /*!< Special mode for FT-817, 857 and 897 using manual T/R switch */
@@ -61,6 +61,7 @@ typedef struct {
     gchar          *name;       /*!< Configuration file name, without .rig. */
     gchar          *host;       /*!< hostname or IP */
     gint            port;       /*!< port number */
+    gint            cycle;      /*!< cycle period in msec */
     gdouble         lo;         /*!< local oscillator freq in Hz (using double for
                                    compatibility with rest of code). Downlink. */
     gdouble         loup;       /*!< local oscillator freq in Hz for uplink. */
@@ -71,6 +72,8 @@ typedef struct {
 
     gboolean        signal_aos; /*!< Send AOS notification to RIG */
     gboolean        signal_los; /*!< Send LOS notification to RIG */
+
+    gint            vfo_opt;    /*!< Keep track of vfo_opt being enabled in rigctld */
 } radio_conf_t;
 
 

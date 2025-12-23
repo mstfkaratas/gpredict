@@ -83,17 +83,23 @@ static void gtk_polar_view_destroy(GtkWidget * widget)
     (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-static void gtk_polar_view_class_init(GtkPolarViewClass * class)
+static void gtk_polar_view_class_init(GtkPolarViewClass * class,
+				      gpointer class_data)
 {
     GtkWidgetClass *widget_class = (GtkWidgetClass *) class;
+
+    (void)class_data;
 
     widget_class->destroy = gtk_polar_view_destroy;
 
     parent_class = g_type_class_peek_parent(class);
 }
 
-static void gtk_polar_view_init(GtkPolarView * polview)
+static void gtk_polar_view_init(GtkPolarView * polview,
+				gpointer g_class)
 {
+    (void)g_class;
+
     polview->sats = NULL;
     polview->qth = NULL;
     polview->obj = NULL;
@@ -604,15 +610,22 @@ static GooCanvasItemModel *create_canvas_model(GtkPolarView * polv)
     polv->cx = POLV_DEFAULT_SIZE / 2;
     polv->cy = POLV_DEFAULT_SIZE / 2;
 
+    /* default font */
+    g_object_get_property(G_OBJECT(gtk_settings_get_default()), "gtk-font-name", &polv->font);
+
     col = mod_cfg_get_int(polv->cfgdata,
                           MOD_CFG_POLAR_SECTION,
-                          MOD_CFG_POLAR_AXIS_COL, SAT_CFG_INT_POLAR_AXIS_COL);
+                          MOD_CFG_POLAR_BGD_COL, SAT_CFG_INT_POLAR_BGD_COL);
 
     polv->bgd = goo_canvas_rect_model_new(root, 0.0, 0.0,
                                           POLV_DEFAULT_SIZE, POLV_DEFAULT_SIZE,
-                                          "fill-color-rgba", 0xFFFFFFFF,
+                                          "fill-color-rgba", col,
                                           "stroke-color-rgba", 0xFFFFFFFF,
                                           NULL);
+
+    col = mod_cfg_get_int(polv->cfgdata,
+                          MOD_CFG_POLAR_SECTION,
+                          MOD_CFG_POLAR_AXIS_COL, SAT_CFG_INT_POLAR_AXIS_COL);
 
     /* Add elevation circles at 0, 30 and 60 deg */
     polv->C00 = goo_canvas_ellipse_model_new(root,
@@ -663,7 +676,7 @@ static GooCanvasItemModel *create_canvas_model(GtkPolarView * polv)
                                         y,
                                         -1,
                                         anch,
-                                        "font", "Sans 10",
+                                        "font", g_value_get_string(&polv->font),
                                         "fill-color-rgba", col, NULL);
 
     azel_to_xy(polv, 180.0, 0.0, &x, &y);
@@ -673,7 +686,7 @@ static GooCanvasItemModel *create_canvas_model(GtkPolarView * polv)
                                         y,
                                         -1,
                                         anch,
-                                        "font", "Sans 10",
+                                        "font", g_value_get_string(&polv->font),
                                         "fill-color-rgba", col, NULL);
 
     azel_to_xy(polv, 90.0, 0.0, &x, &y);
@@ -683,7 +696,7 @@ static GooCanvasItemModel *create_canvas_model(GtkPolarView * polv)
                                         y,
                                         -1,
                                         anch,
-                                        "font", "Sans 10",
+                                        "font", g_value_get_string(&polv->font),
                                         "fill-color-rgba", col, NULL);
 
     azel_to_xy(polv, 270.0, 0.0, &x, &y);
@@ -693,7 +706,7 @@ static GooCanvasItemModel *create_canvas_model(GtkPolarView * polv)
                                         y,
                                         -1,
                                         anch,
-                                        "font", "Sans 10",
+                                        "font", g_value_get_string(&polv->font),
                                         "fill-color-rgba", col, NULL);
 
     /* cursor text */
@@ -705,8 +718,9 @@ static GooCanvasItemModel *create_canvas_model(GtkPolarView * polv)
                                            2 * POLV_LINE_EXTRA,
                                            polv->cy + polv->r +
                                            POLV_LINE_EXTRA, -1,
-                                           GOO_CANVAS_ANCHOR_W, "font",
-                                           "Sans 8", "fill-color-rgba", col,
+                                           GOO_CANVAS_ANCHOR_W,
+                                           "font", g_value_get_string(&polv->font),
+                                           "fill-color-rgba", col,
                                            NULL);
 
     /* location info */
@@ -715,8 +729,9 @@ static GooCanvasItemModel *create_canvas_model(GtkPolarView * polv)
                                              2 * POLV_LINE_EXTRA,
                                              polv->cy - polv->r -
                                              POLV_LINE_EXTRA, -1,
-                                             GOO_CANVAS_ANCHOR_SW, "font",
-                                             "Sans 8", "fill-color-rgba", col,
+                                             GOO_CANVAS_ANCHOR_SW,
+                                             "font", g_value_get_string(&polv->font),
+                                             "fill-color-rgba", col,
                                              NULL);
 
     /* next event */
@@ -725,8 +740,9 @@ static GooCanvasItemModel *create_canvas_model(GtkPolarView * polv)
                                            2 * POLV_LINE_EXTRA,
                                            polv->cy - polv->r -
                                            POLV_LINE_EXTRA, -1,
-                                           GOO_CANVAS_ANCHOR_E, "font",
-                                           "Sans 8", "fill-color-rgba", col,
+                                           GOO_CANVAS_ANCHOR_E,
+                                           "font", g_value_get_string(&polv->font),
+                                           "fill-color-rgba", col,
                                            "alignment", PANGO_ALIGN_RIGHT,
                                            NULL);
 
@@ -735,8 +751,9 @@ static GooCanvasItemModel *create_canvas_model(GtkPolarView * polv)
                                           polv->cx + polv->r +
                                           2 * POLV_LINE_EXTRA,
                                           polv->cy + polv->r + POLV_LINE_EXTRA,
-                                          -1, GOO_CANVAS_ANCHOR_E, "font",
-                                          "Sans 8", "fill-color-rgba", col,
+                                          -1, GOO_CANVAS_ANCHOR_E,
+                                          "font", g_value_get_string(&polv->font),
+                                          "fill-color-rgba", col,
                                           "alignment", PANGO_ALIGN_RIGHT,
                                           NULL);
 
@@ -747,7 +764,7 @@ static GooCanvasItemModel *create_canvas_model(GtkPolarView * polv)
  * Create a new GtkPolarView widget.
  *
  * @param cfgdata The configuration data of the parent module.
- * @param sats Pointer to the hash table containing the asociated satellites.
+ * @param sats Pointer to the hash table containing the associated satellites.
  * @param qth Pointer to the ground station data.
  */
 GtkWidget      *gtk_polar_view_new(GKeyFile * cfgdata, GHashTable * sats,
@@ -1307,7 +1324,7 @@ static void update_sat(gpointer key, gpointer value, gpointer data)
                 obj->label =
                     goo_canvas_text_model_new(root, sat->nickname, x, y + 2,
                                               -1, GOO_CANVAS_ANCHOR_NORTH,
-                                              "font", "Sans 8",
+                                              "font", g_value_get_string(&polv->font),
                                               "fill-color-rgba", colour,
                                               "tooltip", tooltip, NULL);
 
@@ -1465,7 +1482,7 @@ static GooCanvasItemModel *create_time_tick(GtkPolarView * pv, gdouble time,
     item = goo_canvas_text_model_new(root, buff,
                                      (gdouble) x, (gdouble) y,
                                      -1, anchor,
-                                     "font", "Sans 7",
+                                     "font", g_value_get_string(&pv->font),
                                      "fill-color-rgba", col, NULL);
 
     return item;
@@ -1554,7 +1571,7 @@ void gtk_polar_view_create_track(GtkPolarView * pv, sat_obj_t * obj,
         points->coords[2 * i] = (double)x;
         points->coords[2 * i + 1] = (double)y;
 
-        if (!(i % tres))
+        if (tres != 0 && !(i % tres))
         {
             /* create a time tick */
             if (ttidx < TRACK_TICK_NUM)

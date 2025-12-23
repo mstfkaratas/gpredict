@@ -90,21 +90,21 @@
 
 /** Structure representing a boolean value */
 typedef struct {
-    gchar          *group;      /*!< The configration group */
+    gchar          *group;      /*!< The configuration group */
     gchar          *key;        /*!< The configuration key */
     gboolean        defval;     /*!< The default value */
 } sat_cfg_bool_t;
 
 /** Structure representing an integer value */
 typedef struct {
-    gchar          *group;      /*!< The configration group */
+    gchar          *group;      /*!< The configuration group */
     gchar          *key;        /*!< The configuration key */
     gint            defval;     /*!< The default value */
 } sat_cfg_int_t;
 
 /** Structure representing a string value */
 typedef struct {
-    gchar          *group;      /*!< The configration group */
+    gchar          *group;      /*!< The configuration group */
     gchar          *key;        /*!< The configuration key */
     gchar          *defval;     /*!< The default value */
 } sat_cfg_str_t;
@@ -122,6 +122,7 @@ sat_cfg_bool_t  sat_cfg_bool[SAT_CFG_BOOL_NUM] = {
     {"MODULES", "MAP_NEXT_EVENT", TRUE},
     {"MODULES", "MAP_CURSOR_TRACK", FALSE},
     {"MODULES", "MAP_SHOW_GRID", TRUE},
+    {"MODULES", "MAP_SHOW_TERMINATOR", FALSE},
     {"MODULES", "MAP_KEEP_RATIO", FALSE},
     {"MODULES", "POLAR_QTH_INFO", TRUE},
     {"MODULES", "POLAR_NEXT_EVENT", TRUE},
@@ -223,24 +224,23 @@ sat_cfg_str_t   sat_cfg_str[SAT_CFG_STR_NUM] = {
     {"TRSP", "FREQ_FILE", "transmitters/?format=json"},
     {"TRSP", "MODE_FILE", "modes/?format=json"},
     {"TRSP", "PROXY", NULL},
-    {"TLE", "SERVER", "http://www.celestrak.com/NORAD/elements/"},
+    {"TLE", "SERVER", "https://celestrak.org/NORAD/elements/"},
     {"TLE", "FILES", "amateur.txt;cubesat.txt;visual.txt;weather.txt"},
     {"TLE", "PROXY", NULL},
     {"TLE", "URLS",
-     "http://www.amsat.org/amsat/ftp/keps/current/nasabare.txt;"
-     "http://www.celestrak.com/NORAD/elements/amateur.txt;"
-     "http://www.celestrak.com/NORAD/elements/cubesat.txt;"
-     "http://www.celestrak.com/NORAD/elements/galileo.txt;"
-     "http://www.celestrak.com/NORAD/elements/glo-ops.txt;"
-     "http://www.celestrak.com/NORAD/elements/gps-ops.txt;"
-     "http://www.celestrak.com/NORAD/elements/iridium.txt;"
-     "http://www.celestrak.com/NORAD/elements/iridium-NEXT.txt;"
-     "http://www.celestrak.com/NORAD/elements/molniya.txt;"
-     "http://www.celestrak.com/NORAD/elements/noaa.txt;"
-     "http://www.celestrak.com/NORAD/elements/science.txt;"
-     "http://www.celestrak.com/NORAD/elements/tle-new.txt;"
-     "http://www.celestrak.com/NORAD/elements/visual.txt;"
-     "http://www.celestrak.com/NORAD/elements/weather.txt"},
+     "https://www.amsat.org/amsat/ftp/keps/current/nasabare.txt;"
+     "https://celestrak.org/NORAD/elements/amateur.txt;"
+     "https://celestrak.org/NORAD/elements/cubesat.txt;"
+     "https://celestrak.org/NORAD/elements/galileo.txt;"
+     "https://celestrak.org/NORAD/elements/glo-ops.txt;"
+     "https://celestrak.org/NORAD/elements/gps-ops.txt;"
+     "https://celestrak.org/NORAD/elements/iridium-NEXT.txt;"
+     "https://celestrak.org/NORAD/elements/molniya.txt;"
+     "https://celestrak.org/NORAD/elements/noaa.txt;"
+     "https://celestrak.org/NORAD/elements/science.txt;"
+     "https://celestrak.org/NORAD/elements/tle-new.txt;"
+     "https://celestrak.org/NORAD/elements/visual.txt;"
+     "https://celestrak.org/NORAD/elements/weather.txt"},
     {"TLE", "FILE_DIR", NULL},
     {"PREDICT", "SAVE_DIR", NULL}
 };
@@ -347,7 +347,7 @@ guint sat_cfg_load()
 
 /**
  * Save configuration data.
- * @return 0 on success, 1 if an error occured.
+ * @return 0 on success, 1 if an error occurred.
  *
  * This function saves the configuration data currently stored in
  * memory to the gpredict.cfg file.

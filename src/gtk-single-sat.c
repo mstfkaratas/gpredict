@@ -109,18 +109,23 @@ static void gtk_single_sat_destroy(GtkWidget * widget)
     (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-static void gtk_single_sat_class_init(GtkSingleSatClass * class)
+static void gtk_single_sat_class_init(GtkSingleSatClass * class,
+				      gpointer class_data)
 {
     GtkWidgetClass *widget_class;
+
+    (void)class_data;
 
     widget_class = (GtkWidgetClass *) class;
     widget_class->destroy = gtk_single_sat_destroy;
     parent_class = g_type_class_peek_parent(class);
 }
 
-static void gtk_single_sat_init(GtkSingleSat * list)
+static void gtk_single_sat_init(GtkSingleSat * list,
+				gpointer g_class)
 {
     (void)list;
+    (void)g_class;
 }
 
 /* Update a field in the GtkSingleSat view. */
@@ -175,8 +180,8 @@ static void update_field(GtkSingleSat * ssat, guint i)
         }
         else if (sat->range_rate > 0.0)
         {
-            /* Receeding */
-            buff = g_strdup("Receeding");
+            /* Receding */
+            buff = g_strdup("Receding");
         }
         else if (sat->range_rate < 0.0)
         {
@@ -529,10 +534,13 @@ static void gtk_single_sat_popup_cb(GtkWidget * button, gpointer data)
 
     gtk_widget_show_all(menu);
 
-    /* Note: event can be NULL here when called from view_onPopupMenu;
-     *  gdk_event_get_time() accepts a NULL argument */
+    /* gtk_menu_popup got deprecated in 3.22, first available in Ubuntu 18.04 */
+#if GTK_MINOR_VERSION < 22
     gtk_menu_popup(GTK_MENU(menu), NULL, NULL, NULL, NULL,
                    0, gdk_event_get_time((GdkEvent *) NULL));
+#else
+    gtk_menu_popup_at_pointer(GTK_MENU(menu), NULL);
+#endif
 }
 
 /* Refresh internal references to the satellites. */

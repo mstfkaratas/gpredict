@@ -1,7 +1,7 @@
 /*
   Gpredict: Real-time satellite tracking and orbit prediction program
 
-  Copyright (C)  2001-2017  Alexandru Csete, OZ9AEC
+  Copyright (C)  2001-2019  Alexandru Csete, OZ9AEC
   Copyright (C)       2017  Patrick Dohmen, DL4PD
   Copyright (C)       2018  Mario Haustein, DM5AHA
 
@@ -95,7 +95,6 @@ static void     start_timer(GtkRigCtrl * data);
 
 static GtkBoxClass *parent_class = NULL;
 
-
 static void gtk_rig_ctrl_destroy(GtkWidget * widget)
 {
     GtkRigCtrl     *ctrl = GTK_RIG_CTRL(widget);
@@ -115,6 +114,7 @@ static void gtk_rig_ctrl_destroy(GtkWidget * widget)
 
     if (ctrl->conf != NULL)
     {
+        radio_conf_save(ctrl->conf);
         g_free(ctrl->conf->name);
         g_free(ctrl->conf->host);
         g_free(ctrl->conf);
@@ -137,17 +137,23 @@ static void gtk_rig_ctrl_destroy(GtkWidget * widget)
     (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-static void gtk_rig_ctrl_class_init(GtkRigCtrlClass * class)
+static void gtk_rig_ctrl_class_init(GtkRigCtrlClass * class,
+				    gpointer class_data)
 {
     GtkWidgetClass *widget_class;
+
+    (void)class_data;
 
     widget_class = (GtkWidgetClass *) class;
     parent_class = g_type_class_peek_parent(class);
     widget_class->destroy = gtk_rig_ctrl_destroy;
 }
 
-static void gtk_rig_ctrl_init(GtkRigCtrl * ctrl)
+static void gtk_rig_ctrl_init(GtkRigCtrl * ctrl,
+			      gpointer g_class)
 {
+    (void)g_class;
+
     ctrl->sats = NULL;
     ctrl->target = NULL;
     ctrl->pass = NULL;
@@ -344,7 +350,7 @@ static void track_downlink(GtkRigCtrl * ctrl)
     if (ctrl->trsp == NULL)
         return;
 
-    /* ensure that we have a useable transponder config */
+    /* ensure that we have a usable transponder config */
     if ((ctrl->trsp->downlow > 0) && (ctrl->trsp->uplow > 0))
     {
         down = gtk_freq_knob_get_value(GTK_FREQ_KNOB(ctrl->SatFreqDown));
@@ -370,7 +376,7 @@ static void track_uplink(GtkRigCtrl * ctrl)
     if (ctrl->trsp == NULL)
         return;
 
-    /* ensure that we have a useable transponder config */
+    /* ensure that we have a usable transponder config */
     if ((ctrl->trsp->downlow > 0) && (ctrl->trsp->uplow > 0))
     {
         up = gtk_freq_knob_get_value(GTK_FREQ_KNOB(ctrl->SatFreqUp));
@@ -710,7 +716,7 @@ static void trsp_tune_cb(GtkButton * button, gpointer data)
     if ((ctrl->trsp->downlow > 0) && (ctrl->trsp->downhigh > 0))
     {
         freq = ctrl->trsp->downlow +
-            abs(ctrl->trsp->downhigh - ctrl->trsp->downlow) / 2;
+            labs((long)ctrl->trsp->downhigh - (long)ctrl->trsp->downlow) / 2;
         gtk_freq_knob_set_value(GTK_FREQ_KNOB(ctrl->SatFreqDown), freq);
 
         /* invalidate RIG<->GPREDICT sync */
@@ -721,7 +727,7 @@ static void trsp_tune_cb(GtkButton * button, gpointer data)
     if ((ctrl->trsp->uplow > 0) && (ctrl->trsp->uphigh > 0))
     {
         freq = ctrl->trsp->uplow +
-            abs(ctrl->trsp->uphigh - ctrl->trsp->uplow) / 2;
+            labs((long)ctrl->trsp->uphigh - (long)ctrl->trsp->uplow) / 2;
         gtk_freq_knob_set_value(GTK_FREQ_KNOB(ctrl->SatFreqUp), freq);
 
         /* invalidate RIG<->GPREDICT sync */
@@ -798,6 +804,8 @@ static void delay_changed_cb(GtkSpinButton * spin, gpointer data)
     GtkRigCtrl     *ctrl = GTK_RIG_CTRL(data);
 
     ctrl->delay = (guint) gtk_spin_button_get_value(spin);
+    if (ctrl->conf)
+        ctrl->conf->cycle = ctrl->delay;
 
     if (ctrl->engaged)
         start_timer(ctrl);
@@ -835,6 +843,10 @@ static void primary_rig_selected_cb(GtkComboBox * box, gpointer data)
         sat_log_log(SAT_LOG_LEVEL_INFO,
                     _("%s:%s: Loaded new radio configuration %s"),
                     __FILE__, __func__, ctrl->conf->name);
+
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(ctrl->cycle_spin),
+                                  ctrl->conf->cycle);
+
         /* update LO widgets */
         buff = g_strdup_printf(_("%.0f MHz"), ctrl->conf->lo / 1.0e6);
         gtk_label_set_text(GTK_LABEL(ctrl->LoDown), buff);
@@ -991,6 +1003,7 @@ static void rig_engaged_cb(GtkToggleButton * button, gpointer data)
         ctrl->rigctl_thread = g_thread_new("rigctl_run", rigctl_run, ctrl);
         setconfig(ctrl);
     }
+    ctrl->conf2 = NULL;
 }
 
 static GtkWidget *create_target_widgets(GtkRigCtrl * ctrl)
@@ -1178,7 +1191,7 @@ static gint rig_name_compare(const gchar * a, const gchar * b)
 
 static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
 {
-    GtkWidget      *frame, *table, *label, *timer;
+    GtkWidget      *frame, *table, *label;
     GDir           *dir = NULL; /* directory handle */
     GError         *error = NULL;       /* error flag and info */
     gchar          *dirname;    /* directory name */
@@ -1252,7 +1265,6 @@ static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
     g_signal_connect(ctrl->DevSel, "changed",
                      G_CALLBACK(primary_rig_selected_cb), ctrl);
     gtk_grid_attach(GTK_GRID(table), ctrl->DevSel, 1, 0, 1, 1);
-    /* config will be force-loaded after LO spin is created */
 
     /* Secondary device */
     label = gtk_label_new(_("2. Device:"));
@@ -1311,23 +1323,19 @@ static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
                      ctrl);
     gtk_grid_attach(GTK_GRID(table), ctrl->LockBut, 2, 0, 1, 1);
 
-    /* Now, load config */
-    primary_rig_selected_cb(GTK_COMBO_BOX(ctrl->DevSel), ctrl);
-
-    /* Timeout */
+    /* cycle period */
     label = gtk_label_new(_("Cycle:"));
     g_object_set(label, "xalign", 1.0f, "yalign", 0.5f, NULL);
     gtk_grid_attach(GTK_GRID(table), label, 0, 3, 1, 1);
 
-    timer = gtk_spin_button_new_with_range(100, 5000, 10);
-    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(timer), 0);
-    gtk_widget_set_tooltip_text(timer,
+    ctrl->cycle_spin = gtk_spin_button_new_with_range(10, 10000, 10);
+    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(ctrl->cycle_spin), 0);
+    gtk_widget_set_tooltip_text(ctrl->cycle_spin,
                                 _("This parameter controls the delay between "
                                   "commands sent to the rig."));
-    gtk_spin_button_set_value(GTK_SPIN_BUTTON(timer), ctrl->delay);
-    g_signal_connect(timer, "value-changed", G_CALLBACK(delay_changed_cb),
-                     ctrl);
-    gtk_grid_attach(GTK_GRID(table), timer, 1, 3, 1, 1);
+    g_signal_connect(ctrl->cycle_spin, "value-changed",
+                     G_CALLBACK(delay_changed_cb), ctrl);
+    gtk_grid_attach(GTK_GRID(table), ctrl->cycle_spin, 1, 3, 1, 1);
 
     label = gtk_label_new(_("msec"));
     g_object_set(label, "xalign", 0.0f, "yalign", 0.5f, NULL);
@@ -1335,6 +1343,9 @@ static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
 
     frame = gtk_frame_new(_("Settings"));
     gtk_container_add(GTK_CONTAINER(frame), table);
+
+    /* load primary config */
+    primary_rig_selected_cb(GTK_COMBO_BOX(ctrl->DevSel), ctrl);
 
     return frame;
 }
@@ -1478,29 +1489,79 @@ static inline gboolean check_get_response(gchar * buffback, gboolean retcode,
     return retcode;
 }
 
+static int get_vfos(GtkRigCtrl * ctrl, char *rx, char *tx)
+{
+    // fill rx/tx with vfo name plus space if not empty
+    rx = tx = "";
+    switch (ctrl->conf->vfoUp)
+    {
+    case VFO_A:
+        if (ctrl->conf->vfo_opt)
+            {rx = "VFOB ";tx = "VFOA ";}
+        break;
+
+    case VFO_B:
+        if (ctrl->conf->vfo_opt)
+           {rx = "VFOA ";tx = "VFOB ";}
+        break;
+
+    case VFO_MAIN:
+        if (ctrl->conf->vfo_opt)
+            {rx = "Sub";tx = "Main";}
+        break;
+
+    case VFO_SUB:
+        if (ctrl->conf->vfo_opt)
+            {rx = "Main";tx = "Sub";}
+        break;
+
+    default:
+        sat_log_log(SAT_LOG_LEVEL_ERROR,
+                    _("%s called but TX VFO is %d and we don't know how to handle it."), __func__,
+                    ctrl->conf->vfoUp);
+        return 1;
+    }
+    sat_log_log(SAT_LOG_LEVEL_DEBUG, "rx=%x, tx=%s\n", rx, tx);
+    return 0;
+}
+
 /* Setup VFOs for split operation (simplex or duplex) */
 static gboolean setup_split(GtkRigCtrl * ctrl)
 {
     gchar          *buff;
     gchar           buffback[256];
     gboolean        retcode;
+    gchar          *rx="", *tx="";
 
+    get_vfos(ctrl, rx, tx);
     switch (ctrl->conf->vfoUp)
     {
     case VFO_A:
-        buff = g_strdup("S 1 VFOA\x0a");
+        if (ctrl->conf->vfo_opt)
+            buff = g_strdup("S VFOB 1 VFOA\x0a");
+        else
+            buff = g_strdup("S 1 VFOA\x0a");
         break;
 
     case VFO_B:
-        buff = g_strdup("S 1 VFOB\x0a");
+        if (ctrl->conf->vfo_opt)
+            buff = g_strdup("S VFOA 1 VFOB\x0a");
+        else
+            buff = g_strdup("S 1 VFOB\x0a");
         break;
 
     case VFO_MAIN:
-        buff = g_strdup("S 1 Main\x0a");
+        if (ctrl->conf->vfo_opt)
+            buff = g_strdup("S Sub 1 Main\x0a");
+        else
+            buff = g_strdup("S 1 Main\x0a");
         break;
 
     case VFO_SUB:
-        buff = g_strdup("S 1 Sub\x0a");
+        if (ctrl->conf->vfo_opt)
+            buff = g_strdup("S Main 1 Sub\x0a");
+        else
+            buff = g_strdup("S 1 Sub\x0a");
         break;
 
     default:
@@ -1804,19 +1865,19 @@ static void exec_toggle_cycle(GtkRigCtrl * ctrl)
      */
     if (ctrl->conf->type == RIG_TYPE_TOGGLE_AUTO)
     {
-        GTimeVal        current_time;
+	gint64          current_time;
 
         /* get the current time */
-        g_get_current_time(&current_time);
+	current_time = g_get_real_time() / G_USEC_PER_SEC;
 
         if ((ctrl->last_toggle_tx == -1) ||
-            ((current_time.tv_sec - ctrl->last_toggle_tx) >= 10))
+            ((current_time - ctrl->last_toggle_tx) >= 10))
         {
             /* it's time to update TX freq */
             exec_toggle_tx_cycle(ctrl);
 
             /* store current time */
-            ctrl->last_toggle_tx = current_time.tv_sec;
+            ctrl->last_toggle_tx = current_time;
         }
     }
 }
@@ -2242,12 +2303,18 @@ static gboolean get_ptt(GtkRigCtrl * ctrl, gint sock)
     if (ctrl->conf->ptt == PTT_TYPE_CAT)
     {
         /* send command get_ptt (t) */
-        buff = g_strdup_printf("t\x0a");
+        if (ctrl->conf->vfo_opt)
+            buff = g_strdup_printf("t currVFO\x0a");
+        else
+            buff = g_strdup_printf("t\x0a");
     }
     else
     {
         /* send command \get_dcd */
-        buff = g_strdup_printf("%c\x0a", 0x8b);
+        if (ctrl->conf->vfo_opt)
+            buff = g_strdup_printf("%c currVFO\x0a", 0x8b);
+        else
+            buff = g_strdup_printf("%c\x0a", 0x8b);
     }
 
     retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
@@ -2271,10 +2338,20 @@ static gboolean set_ptt(GtkRigCtrl * ctrl, gint sock, gboolean ptt)
     gboolean        retcode;
 
     /* send command */
-    if (ptt == TRUE)
-        buff = g_strdup_printf("T 1\x0aq\x0a");
+    if (ptt == TRUE) 
+    {
+        if (ctrl->conf->vfo_opt)
+            buff = g_strdup_printf("T currVFO 1\x0aq\x0a");
+        else
+            buff = g_strdup_printf("T 1\x0aq\x0a");
+    }
     else
-        buff = g_strdup_printf("T 0\x0aq\x0a");
+    {
+        if (ctrl->conf->vfo_opt)
+            buff = g_strdup_printf("T currVFO 0\x0aq\x0a");
+        else
+            buff = g_strdup_printf("T 0\x0aq\x0a");
+    }
 
     retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
     g_free(buff);
@@ -2291,7 +2368,7 @@ static gboolean set_ptt(GtkRigCtrl * ctrl, gint sock, gboolean ptt)
  *         occurred.
  *
  * This function checks whether AOS or LOS just happened and sends the
- * apropriate signal to the RIG if this signalling is enabled.
+ * appropriate signal to the RIG if this signalling is enabled.
  */
 static gboolean check_aos_los(GtkRigCtrl * ctrl)
 {
@@ -2352,7 +2429,10 @@ static gboolean set_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble freq)
     gchar           buffback[128];
     gboolean        retcode;
 
-    buff = g_strdup_printf("F %10.0f\x0a", freq);
+    if (ctrl->conf->vfo_opt)
+        buff = g_strdup_printf("F currVFO %10.0f\x0a", freq);
+    else
+        buff = g_strdup_printf("F %10.0f\x0a", freq);
     retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
     g_free(buff);
 
@@ -2372,7 +2452,12 @@ static gboolean set_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble freq)
     gboolean        retcode;
 
     /* send command */
-    buff = g_strdup_printf("I %10.0f\x0a", freq);
+    printf("set_freq_toggle %d\n", ctrl->conf->vfo_opt);
+    if (ctrl->conf->vfo_opt)
+        buff = g_strdup_printf("I VFOA %10.0f\x0a", freq);
+    else
+        buff = g_strdup_printf("I %10.0f\x0a", freq);
+
     retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
     g_free(buff);
 
@@ -2391,6 +2476,9 @@ static gboolean set_toggle(GtkRigCtrl * ctrl, gint sock)
     gchar           buffback[128];
     gboolean        retcode;
 
+    if (ctrl->conf->vfo_opt)
+    buff = g_strdup_printf("S %s 1 %d\x0a", ctrl->conf->vfoDown==VFO_A?"VFOA":"VFOB", ctrl->conf->vfoDown);
+    else
     buff = g_strdup_printf("S 1 %d\x0a", ctrl->conf->vfoDown);
     retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
     g_free(buff);
@@ -2410,7 +2498,10 @@ static gboolean unset_toggle(GtkRigCtrl * ctrl, gint sock)
     gboolean        retcode;
 
     /* send command */
-    buff = g_strdup_printf("S 0 %d\x0a", ctrl->conf->vfoDown);
+    if (ctrl->conf->vfo_opt)
+        buff = g_strdup_printf("S VFOA 0 %d\x0a", ctrl->conf->vfoDown);
+    else
+        buff = g_strdup_printf("S 0 %d\x0a", ctrl->conf->vfoDown);
     retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
     g_free(buff);
 
@@ -2429,7 +2520,10 @@ static gboolean get_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble * freq)
     gboolean        retcode;
     gboolean        retval = TRUE;
 
-    buff = g_strdup_printf("f\x0a");
+    if (ctrl->conf->vfo_opt)
+        buff = g_strdup_printf("f currVFO\x0a");
+    else
+        buff = g_strdup_printf("f\x0a");
     retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
     retcode = check_get_response(buffback, retcode, __func__);
     if (retcode)
@@ -2440,6 +2534,39 @@ static gboolean get_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble * freq)
         else
             retval = FALSE;
         g_strfreev(vbuff);
+    }
+    else
+    {
+        retval = FALSE;
+    }
+
+    g_free(buff);
+    return retval;
+}
+
+/*
+ * Get vfo option
+ *
+ * Returns TRUE if the vfo option enabled was successful, FALSE otherwise
+ */
+static gboolean get_vfo_opt(GtkRigCtrl * ctrl, gint sock)
+{
+    gchar          *buff;
+    gchar           buffback[128];
+    gboolean        retcode;
+    gboolean        retval = TRUE;
+
+    buff = g_strdup_printf("\\set_vfo_opt 1\x0a");
+    send_rigctld_command(ctrl, sock, buff, buffback, 128);
+    // we don't really care about the return from set_vto_opt
+    // we'll check to see if it worked next
+    buff = g_strdup_printf("\\chk_vfo\x0a");
+    retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
+    retcode = check_get_response(buffback, retcode, __func__);
+    if (retcode)
+    {
+        if (buffback[0]=='1') return TRUE;
+        else return FALSE;
     }
     else
     {
@@ -2470,7 +2597,10 @@ static gboolean get_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble * freq)
     }
 
     /* send command */
-    buff = g_strdup_printf("i\x0a");
+    if (ctrl->conf->vfo_opt)
+        buff = g_strdup_printf("i currVFO\x0a");
+    else
+        buff = g_strdup_printf("i\x0a");
     retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
     retcode = check_get_response(buffback, retcode, __func__);
     if (retcode)
@@ -2503,7 +2633,7 @@ static gboolean get_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble * freq)
  * TRUE (on). If PTT status is TRUE (on) it will simply set the PTT to FALSE
  * (off).
  *
- * This function assumes that the radio supprot set/get PTT, otherwise it makes
+ * This function assumes that the radio support set/get PTT, otherwise it makes
  * no sense to use it!
  */
 static void manage_ptt_event(GtkRigCtrl * ctrl)
@@ -2719,11 +2849,22 @@ static void rigctrl_open(GtkRigCtrl * data)
 
     open_rigctld_socket(ctrl->conf, &(ctrl->sock));
 
+    // check to see if vfo option is enabled
+    ctrl->conf->vfo_opt = get_vfo_opt(ctrl, ctrl->sock);
+    sat_log_log(SAT_LOG_LEVEL_DEBUG,
+            _("%s:%s: VFO opt=%d"), __FILE__,
+            __func__, ctrl->conf->vfo_opt);
+
     /* set initial frequency */
     if (ctrl->conf2 != NULL)
     {
         open_rigctld_socket(ctrl->conf2, &(ctrl->sock2));
         /* set initial dual mode */
+        ctrl->conf2->vfo_opt = get_vfo_opt(ctrl, ctrl->sock);
+        sat_log_log(SAT_LOG_LEVEL_DEBUG,
+                _("%s:%s: VFO opt2=%d"), __FILE__,
+                __func__, ctrl->conf2->vfo_opt);
+
         exec_dual_rig_cycle(ctrl);
     }
     else

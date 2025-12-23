@@ -1,7 +1,7 @@
 /*
     Gpredict: Real-time satellite tracking and orbit prediction program
 
-    Copyright (C)  2001-2017  Alexandru Csete, OZ9AEC.
+    Copyright (C)  2001-2019  Alexandru Csete, OZ9AEC.
 
     Comments, questions and bugreports should be submitted via
     http://sourceforge.net/projects/gpredict/
@@ -49,6 +49,8 @@ const gchar *authors[] = {
     "Henry Hallam",
     "Ilias Daradimos",
     "Jan Simon, DL2ZXA",
+    "Jason Uher",
+    "Joachim Euchner",
     "John Magliacane, KD2BD",
     "Libre Space Foundation",
     "Lloyd Brown",
@@ -57,15 +59,18 @@ const gchar *authors[] = {
     "Mario Haustein",
     "Martin Pool",
     "Matthew Alberti, KM4EXS",
+    "Michael Black",
     "Michael Tatarinov",
     "Mirko Caserta",
     "Nate Bargmann, N0NB",
     "Neoklis Kyriazis, 5B4AZ",
+    "Nicholas DeCicco",
     "Patrick Dohmen, DL4PD",
     "Patrick Strasser, OE6PSE",
     "Paul Schulz, VK5FPAW",
     "Phil Ashby, 2E0IPX",
     "S. R. Sampson",
+    "Satoshi Yasuda, 7M3TJZ",
     "Stefan Lobas",
     "Stephane Fillod",
     "Tom Jones",
@@ -74,6 +79,7 @@ const gchar *authors[] = {
     "William J Beksi, KC2EXL",
     "Xavier Crehueras, EB3CZS",
     "Yaroslav Stavnichiy",
+    "Yasushi SHOJI",
     "",
     "Imagery:",
     "Most of the maps originate from NASA Visible Earth",
@@ -94,7 +100,7 @@ void about_dialog_create()
     gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(dialog), _("Gpredict"));
     gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(dialog), VERSION);
     gtk_about_dialog_set_copyright(GTK_ABOUT_DIALOG(dialog),
-                                   _("Copyright (C) 2001-2017 Alexandru Csete OZ9AEC and contributors"));
+                                   _("Copyright (C) 2001-2019 Alexandru Csete OZ9AEC and contributors"));
     gtk_about_dialog_set_website(GTK_ABOUT_DIALOG(dialog),
                                  "http://gpredict.oz9aec.net/");
     gtk_about_dialog_set_license_type(GTK_ABOUT_DIALOG(dialog),

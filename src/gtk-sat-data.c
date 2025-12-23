@@ -44,7 +44,7 @@
  *
  * @param catnum The catalog number of the satellite.
  * @param sat Pointer to a valid sat_t structure.
- * @return 0 if successfull, 1 if an I/O error occurred,
+ * @return 0 if successful, 1 if an I/O error occurred,
  *         2 if the TLE data appears to be bad.
  *
  */
@@ -253,9 +253,10 @@ void gtk_sat_data_init_sat(sat_t * sat, qth_t * qth)
     sat->footprint = 2.0 * xkmper * acos(xkmper / sat->pos.w);
     age = 0.0;
     sat->orbit = (long)floor((sat->tle.xno * xmnpda / twopi +
-                              age * sat->tle.bstar * ae) * age -
-                             (sat->tle.xmo + sat->tle.omegao) / twopi) +
-        sat->tle.revnum;
+                              age * sat->tle.bstar * ae) * age +
+                             (sat->tle.xmo + sat->tle.omegao) / twopi)
+      - (long)floor((sat->tle.xmo + sat->tle.omegao) / twopi)
+      + sat->tle.revnum;
 
     /* orbit type */
     sat->otype = get_orbit_type(sat);

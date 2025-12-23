@@ -19,8 +19,16 @@
 #ifdef HAVE_CONFIG_H
 #include <build-config.h>
 #endif
+
+#ifndef WIN32
+#define _DEFAULT_SOURCE     // see man timegm
+#else
+#define timegm _mkgmtime    // https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/mkgmtime-mkgmtime32-mkgmtime64?view=vs-2017
+#endif
+
 #include <glib/gi18n.h>
 #include <gtk/gtk.h>
+#include <time.h>
 
 #include "config-keys.h"
 #include "orbit-tools.h"
@@ -232,13 +240,15 @@ static gchar   *epoch_to_str(sat_t * sat)
     fmt = sat_cfg_get_str(SAT_CFG_STR_TIME_FORMAT);
 
     /* format either local time or UTC depending on check box */
-    t = mktime(&tms);
     buff = g_try_malloc(51);
 
     if (sat_cfg_get_bool(SAT_CFG_BOOL_USE_LOCAL_TIME))
+    {
+        t = timegm(&tms);
         size = strftime(buff, 50, fmt, localtime(&t));
+    }
     else
-        size = strftime(buff, 50, fmt, gmtime(&t));
+        size = strftime(buff, 50, fmt, &tms);
 
     if (size < 50)
         buff[size] = '\0';

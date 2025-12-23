@@ -167,7 +167,7 @@ static void name_changed(GtkWidget * widget, gpointer data)
         {
             if (!gpredict_legal_char(*j))
             {
-                gdk_beep();
+                gdk_display_beep(gdk_display_get_default());
                 pos = gtk_editable_get_position(GTK_EDITABLE(widget));
                 gtk_editable_delete_text(GTK_EDITABLE(widget), pos, pos + 1);
             }
@@ -290,8 +290,8 @@ static GtkWidget *create_editor_widgets(radio_conf_t * conf)
     type = gtk_combo_box_text_new();
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type), _("RX only"));
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type), _("TX only"));
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type), _("Simplex TRX"));
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type), _("Duplex TRX"));
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type), _("Half-duplex"));
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type), _("Full-duplex"));
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type),
                                    _("FT817/857/897 (auto)"));
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type),
@@ -310,14 +310,14 @@ static GtkWidget *create_editor_widgets(radio_conf_t * conf)
                                     "used for uplink. If <i>Monitor PTT status</i>"
                                     " is checked the doppler tuning will be "
                                     "suspended while PTT is OFF (manual RX).\n\n"
-                                    "<b>Simplex TRX:</b>  The radio should be "
-                                    "used for both up- and downlink but in "
-                                    "simplex mode only. This option requires "
+                                    "<b>Half-duplex:</b>  The radio should be "
+                                    "used for both up- and downlink but not at "
+                                    "the same time. This option requires "
                                     "that the PTT status is monitored (otherwise "
                                     "gpredict cannot know whether to tune the "
                                     "RX or the TX).\n\n"
-                                    "<b>Duplex:</b>  The radio is a full duplex "
-                                    "radio, such as the IC910H. Gpredict will "
+                                    "<b>Full-duplex:</b>  The radio is a full-duplex"
+                                    " radio, such as the IC910H. Gpredict will "
                                     "be continuously tuning both uplink and "
                                     "downlink simultaneously and not care about "
                                     "PTT setting.\n\n"
@@ -520,7 +520,7 @@ void sat_pref_rig_editor_run(radio_conf_t * conf)
     gint            response;
     gboolean        finished = FALSE;
 
-    /* crate dialog and add contents */
+    /* create dialog and add contents */
     dialog = gtk_dialog_new_with_buttons(_("Edit radio configuration"),
                                          GTK_WINDOW(window),
                                          GTK_DIALOG_MODAL |

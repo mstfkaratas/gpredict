@@ -108,7 +108,7 @@ static void name_changed(GtkWidget * widget, gpointer data)
         {
             if (!gpredict_legal_char(*j))
             {
-                gdk_beep();
+                gdk_display_beep(gdk_display_get_default());
                 pos = gtk_editable_get_position(GTK_EDITABLE(widget));
                 gtk_editable_delete_text(GTK_EDITABLE(widget), pos, pos + 1);
             }
@@ -345,7 +345,7 @@ void sat_pref_rot_editor_run(rotor_conf_t * conf)
     gint            response;
     gboolean        finished = FALSE;
 
-    /* crate dialog and add contents */
+    /* create dialog and add contents */
     dialog = gtk_dialog_new_with_buttons(_("Edit rotator configuration"),
                                          GTK_WINDOW(window),
                                          GTK_DIALOG_MODAL |

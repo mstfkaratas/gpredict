@@ -40,18 +40,23 @@ static void gtk_rot_knob_destroy(GtkWidget * widget)
     (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-static void gtk_rot_knob_class_init(GtkRotKnobClass * class)
+static void gtk_rot_knob_class_init(GtkRotKnobClass * class,
+				    gpointer class_data)
 {
     GtkWidgetClass *widget_class = (GtkWidgetClass *) class;
+
+    (void)class_data;
 
     widget_class->destroy = gtk_rot_knob_destroy;
 
     parent_class = g_type_class_peek_parent(class);
 }
 
-static void gtk_rot_knob_init(GtkRotKnob * knob)
+static void gtk_rot_knob_init(GtkRotKnob * knob,
+			      gpointer g_class)
 {
     (void)knob;
+    (void)g_class;
 }
 
 /*
@@ -354,7 +359,7 @@ gdouble gtk_rot_knob_get_min(GtkRotKnob * knob)
  */
 void gtk_rot_knob_set_min(GtkRotKnob * knob, gdouble min)
 {
-    /* just som sanity check we have only 3 digits */
+    /* just some sanity check we have only 3 digits */
     if (min < 1000)
     {
         knob->min = min;
@@ -376,7 +381,7 @@ void gtk_rot_knob_set_min(GtkRotKnob * knob, gdouble min)
  */
 void gtk_rot_knob_set_max(GtkRotKnob * knob, gdouble max)
 {
-    /* just som sanity check we have only 3 digits */
+    /* just some sanity check we have only 3 digits */
     if (max < 1000)
     {
         knob->max = max;

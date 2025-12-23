@@ -1,5 +1,5 @@
 ACLOCAL_AMFLAGS = -I m4
-SUBDIRS = src doc pixmaps data po
+SUBDIRS = src doc icons pixmaps data po
 
 BUILT_SOURCES = $(top_srcdir)/.version
 $(top_srcdir)/.version:
@@ -20,6 +20,7 @@ EXTRA_DIST = \
 	intltool-extract.in   \
 	intltool-merge.in     \
 	intltool-update.in    \
+	snap/snapcraft.yaml   \
 	win32/config.mk       \
 	win32/goocanvasprivate.h \
 	win32/gpredict.rc        \

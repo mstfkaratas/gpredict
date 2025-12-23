@@ -48,6 +48,7 @@ struct _gtk_rig_ctrl {
     GtkWidget      *DevSel;     /*!< Device selector */
     GtkWidget      *DevSel2;    /*!< Second device selector */
     GtkWidget      *LockBut;
+    GtkWidget      *cycle_spin;      /*!< Update timer cycle */
 
     radio_conf_t   *conf;       /*!< Radio configuration */
     radio_conf_t   *conf2;      /*!< Secondary radio configuration */
@@ -77,7 +78,7 @@ struct _gtk_rig_ctrl {
     gdouble         lasttxf;    /*!< Last frequency sent to tranmitter. */
     gdouble         du, dd;     /*!< Last computed up/down Doppler shift; computed in update() */
 
-    glong           last_toggle_tx;     /*!< Last time when exec_toggle_tx_cycle() was executed (seconds)
+    gint64          last_toggle_tx;     /*!< Last time when exec_toggle_tx_cycle() was executed (seconds)
                                            -1 indicates that an update should be performed ASAP */
 
     gint            sock, sock2;        /*!< Sockets for controlling the radio(s). */
@@ -90,7 +91,7 @@ struct _gtk_rig_ctrl {
     /* threads related stuff */
     /* add mutexes etc, to make threads reentrant! */
     GMutex          writelock;  /*!< Mutex for blocking write operation */
-    GMutex          rig_ctrl_updatelock;        /*!< Mutex wile updating widgets etc */
+    GMutex          rig_ctrl_updatelock;        /*!< Mutex while updating widgets etc */
     GMutex          widgetsync; /*!< Mutex used while leaving (sync stuff) */
     GCond           widgetready;        /*!< Condition when work is done (sync stuff) */
     GAsyncQueue    *rigctlq;    /*!< Message queue to indicate something has changed */

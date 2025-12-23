@@ -69,8 +69,11 @@
 
 static GtkVBoxClass *parent_class = NULL;
 
-static void gtk_sky_glance_init(GtkSkyGlance * skg)
+static void gtk_sky_glance_init(GtkSkyGlance * skg,
+	gpointer g_class)
 {
+    (void)g_class;
+
     skg->sats = NULL;
     skg->qth = NULL;
     skg->passes = NULL;
@@ -147,9 +150,12 @@ static void gtk_sky_glance_destroy(GtkWidget * widget)
 }
 
 
-static void gtk_sky_glance_class_init(GtkSkyGlanceClass * class)
+static void gtk_sky_glance_class_init(GtkSkyGlanceClass * class,
+				      gpointer class_data)
 {
     GtkWidgetClass *widget_class;
+
+    (void)class_data;
 
     widget_class = (GtkWidgetClass *) class;
     widget_class->destroy = gtk_sky_glance_destroy;
@@ -499,7 +505,7 @@ static void create_canvas_items(GtkSkyGlance * skg)
     skg->timel = goo_canvas_text_new(root, "--:--",
                                      skg->x0 + 5, skg->y0,
                                      -1, GOO_CANVAS_ANCHOR_NW,
-                                     "font", "Sans 8",
+                                     "font", g_value_get_string(&skg->font),
                                      "fill-color-rgba", 0x000000AF, NULL);
 
     /* footer */
@@ -515,14 +521,14 @@ static void create_canvas_items(GtkSkyGlance * skg)
                                          skg->w / 2,
                                          skg->h + SKG_FOOTER - 5,
                                          -1, GOO_CANVAS_ANCHOR_S,
-                                         "font", "Sans 9",
+                                         "font", g_value_get_string(&skg->font),
                                          "fill-color-rgba", 0xFFFFFFFF, NULL);
     else
         skg->axisl = goo_canvas_text_new(root, _("UTC"),
                                          skg->w / 2,
                                          skg->h + SKG_FOOTER - 5,
                                          -1, GOO_CANVAS_ANCHOR_S,
-                                         "font", "Sans 9",
+                                         "font", g_value_get_string(&skg->font),
                                          "fill-color-rgba", 0xFFFFFFFF, NULL);
 
 
@@ -560,7 +566,7 @@ static void create_canvas_items(GtkSkyGlance * skg)
 
         hrl = goo_canvas_text_new(root, buff, xh, skg->h + 12,
                                   -1, GOO_CANVAS_ANCHOR_N,
-                                  "font", "Sans 8",
+                                  "font", g_value_get_string(&skg->font),
                                   "fill-color-rgba", 0xFFFFFFFF, NULL);
 
         /* 30 min tick */
@@ -756,7 +762,7 @@ static void create_sat(gpointer key, gpointer value, gpointer data)
         /* add satellite label */
         label = goo_canvas_text_new(root, sat->nickname,
                                     5, 0, -1, GOO_CANVAS_ANCHOR_W,
-                                    "font", "Sans 8",
+                                    "font", g_value_get_string(&skg->font),
                                     "fill-color-rgba", bcol, NULL);
         skg->satlab = g_slist_append(skg->satlab, label);
     }
@@ -765,7 +771,7 @@ static void create_sat(gpointer key, gpointer value, gpointer data)
 /**
  * Create a new GtkSkyGlance widget.
  *
- * @param sats Pointer to the hash table containing the asociated satellites.
+ * @param sats Pointer to the hash table containing the associated satellites.
  * @param qth Pointer to the ground station data.
  * @param ts The t0 for the timeline or 0 to use the current date and time.
  */
@@ -781,6 +787,9 @@ GtkWidget      *gtk_sky_glance_new(GHashTable * sats, qth_t * qth, gdouble ts)
         return gtk_label_new(_("This module has no satellites!"));
 
     skg = GTK_SKY_GLANCE(g_object_new(GTK_TYPE_SKY_GLANCE, NULL));
+
+    /* default font */
+    g_object_get_property(G_OBJECT(gtk_settings_get_default()), "gtk-font-name", &skg->font);
 
     /* FIXME? */
     skg->sats = sats;

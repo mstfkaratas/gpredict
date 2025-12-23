@@ -24,6 +24,7 @@
 #include <gtk/gtk.h>
 #include <glib/gi18n.h>
 #include <math.h>
+#include "compat.h"
 #include "gtk-freq-knob.h"
 
 
@@ -55,9 +56,12 @@ static void gtk_freq_knob_destroy(GtkWidget * widget)
     (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-static void gtk_freq_knob_class_init(GtkFreqKnobClass * class)
+static void gtk_freq_knob_class_init(GtkFreqKnobClass * class,
+				     gpointer class_init)
 {
     GtkWidgetClass *widget_class;
+
+    (void)class_init;
 
     widget_class = (GtkWidgetClass *) class;
     parent_class = g_type_class_peek_parent(class);
@@ -74,13 +78,16 @@ static void gtk_freq_knob_class_init(GtkFreqKnobClass * class)
                                        G_TYPE_NONE, 0);
 }
 
-static void gtk_freq_knob_init(GtkFreqKnob * knob)
+static void gtk_freq_knob_init(GtkFreqKnob * knob,
+			       gpointer g_class)
 {
+    (void)g_class;
+
     knob->min = 0.0;
     knob->max = 9999999999.0;
 }
 
-static void    *gtk_freq_knob_update(GtkFreqKnob * knob)
+static gboolean gtk_freq_knob_update(GtkFreqKnob * knob)
 {
     gchar           b[11];
     gchar          *buff;
@@ -310,7 +317,11 @@ GtkWidget      *gtk_freq_knob_new(gdouble val, gboolean buttons)
     GtkWidget      *label;
     guint           i;
     gint            delta;
-
+    const gchar     beginTag[] = "<span size='xx-large'>";
+    const gchar     endTag[] = "</span>";
+    gchar          *markup = NULL;
+    size_t          markupBufSize;
+    const gchar    *thousandsSep = get_locale_thousands_sep();
 
     widget = g_object_new(GTK_TYPE_FREQ_KNOB, NULL);
     knob = GTK_FREQ_KNOB(widget);
@@ -383,12 +394,24 @@ GtkWidget      *gtk_freq_knob_new(gdouble val, gboolean buttons)
     }
 
     /* Add misc labels */
+    markupBufSize = strlen(beginTag) + strlen(endTag) +
+                                 strlen(thousandsSep) + 1;
+    markup = (char*) malloc(sizeof(char)*markupBufSize);
+    if (markup && thousandsSep) {
+        snprintf(markup, markupBufSize, "%s%s%s", beginTag, thousandsSep, endTag);
+    } else {
+        markup = "<span size='xx-large'>.</span>";
+    }
     label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(label), "<span size='xx-large'>.</span>");
+    gtk_label_set_markup(GTK_LABEL(label), markup);
     gtk_grid_attach(GTK_GRID(table), label, 5, 1, 1, 1);
     label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(label), "<span size='xx-large'>.</span>");
+    gtk_label_set_markup(GTK_LABEL(label), markup);
     gtk_grid_attach(GTK_GRID(table), label, 9, 1, 1, 1);
+
+    if (markup) {
+        free(markup);
+    }
 
     label = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(label), "<span size='xx-large'> Hz</span>");

@@ -58,17 +58,23 @@ static void gtk_azel_plot_destroy(GtkWidget * widget)
     (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-static void gtk_azel_plot_class_init(GtkAzelPlotClass * class)
+static void gtk_azel_plot_class_init(GtkAzelPlotClass * class,
+				     gpointer class_data)
 {
     GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(class);
+
+    (void)class_data;
 
     widget_class->destroy = gtk_azel_plot_destroy;
     parent_class = g_type_class_peek_parent(class);
 
 }
 
-static void gtk_azel_plot_init(GtkAzelPlot * azel)
+static void gtk_azel_plot_init(GtkAzelPlot * azel,
+			       gpointer g_class)
 {
+    (void)g_class;
+
     azel->qth = NULL;
     azel->width = 0;
     azel->height = 0;
@@ -417,6 +423,9 @@ static GooCanvasItemModel *create_canvas_model(GtkAzelPlot * azel)
 
     root = goo_canvas_group_model_new(NULL, NULL);
 
+    /* default font */
+    g_object_get_property(G_OBJECT(gtk_settings_get_default()), "gtk-font-name", &azel->font);
+
     /* graph dimensions */
     azel->width = AZEL_DEFAULT_SIZE;
     azel->height = AZEL_DEFAULT_SIZE;
@@ -491,7 +500,7 @@ static GooCanvasItemModel *create_canvas_model(GtkAzelPlot * azel)
                                (gfloat) (azel->y0 + 5),
                                -1,
                                GOO_CANVAS_ANCHOR_N,
-                               "font", "Sans 8",
+                               "font", g_value_get_string(&azel->font),
                                "fill-color-rgba", 0x000000FF, NULL);
 
         /* left y tick marks */
@@ -523,7 +532,8 @@ static GooCanvasItemModel *create_canvas_model(GtkAzelPlot * azel)
         azel->azlab[i] =
             MKTEXT(root, txt, (gfloat) (azel->x0 - 5),
                    (gfloat) (azel->y0 - (i + 1) * ystep), -1,
-                   GOO_CANVAS_ANCHOR_E, "font", "Sans 8",
+                   GOO_CANVAS_ANCHOR_E,
+                   "font", g_value_get_string(&azel->font),
                    "fill-color-rgba", 0x0000BFFF, NULL);
         g_free(txt);
 
@@ -535,7 +545,8 @@ static GooCanvasItemModel *create_canvas_model(GtkAzelPlot * azel)
             MKTEXT(root, txt, (gfloat) (azel->xmax + 5),
                    (gfloat) (azel->y0 - (i + 1) * ystep), -1,
                    GOO_CANVAS_ANCHOR_W,
-                   "font", "Sans 8", "fill-color-rgba", 0xBF0000FF, NULL);
+                   "font", g_value_get_string(&azel->font),
+                   "fill-color-rgba", 0xBF0000FF, NULL);
         g_free(txt);
     }
 
@@ -547,7 +558,7 @@ static GooCanvasItemModel *create_canvas_model(GtkAzelPlot * azel)
                             (gfloat) (azel->height - 5),
                             -1,
                             GOO_CANVAS_ANCHOR_S,
-                            "font", "Sans 9",
+                            "font", g_value_get_string(&azel->font),
                             "fill-color-rgba", 0x000000FF, NULL);
     }
     else
@@ -557,7 +568,7 @@ static GooCanvasItemModel *create_canvas_model(GtkAzelPlot * azel)
                             (gfloat) (azel->height - 5),
                             -1,
                             GOO_CANVAS_ANCHOR_S,
-                            "font", "Sans 9",
+                            "font", g_value_get_string(&azel->font),
                             "fill-color-rgba", 0x000000FF, NULL);
     }
 
@@ -567,7 +578,8 @@ static GooCanvasItemModel *create_canvas_model(GtkAzelPlot * azel)
                         5.0,
                         -1,
                         GOO_CANVAS_ANCHOR_N,
-                        "font", "Sans 8", "fill-color-rgba", 0x000000FF, NULL);
+                        "font", g_value_get_string(&azel->font),
+                        "fill-color-rgba", 0x000000FF, NULL);
 
     /* Az legend */
     azel->azleg = MKTEXT(root, _("Az"),
@@ -575,7 +587,7 @@ static GooCanvasItemModel *create_canvas_model(GtkAzelPlot * azel)
                          (gfloat) azel->ymax,
                          -1,
                          GOO_CANVAS_ANCHOR_NE,
-                         "font", "Sans 9",
+                         "font", g_value_get_string(&azel->font),
                          "fill-color-rgba", 0x0000BFFF, NULL);
 
     /* El legend */
@@ -584,7 +596,7 @@ static GooCanvasItemModel *create_canvas_model(GtkAzelPlot * azel)
                          (gfloat) azel->ymax,
                          -1,
                          GOO_CANVAS_ANCHOR_NW,
-                         "font", "Sans 9",
+                         "font", g_value_get_string(&azel->font),
                          "fill-color-rgba", 0xBF0000FF, NULL);
 
     /* Az graph */
@@ -608,7 +620,7 @@ static GooCanvasItemModel *create_canvas_model(GtkAzelPlot * azel)
 /**
  * Create a new GtkAzelPlot widget.
  * @param cfgdata The configuration data of the parent module.
- * @param sats Pointer to the hash table containing the asociated satellites.
+ * @param sats Pointer to the hash table containing the associated satellites.
  * @param qth Pointer to the ground station data.
  */
 GtkWidget      *gtk_azel_plot_new(qth_t * qth, pass_t * pass)

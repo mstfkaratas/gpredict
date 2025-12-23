@@ -231,7 +231,7 @@ static void name_changed(GtkWidget * widget, gpointer data)
         {
             if (!gpredict_legal_char(*j))
             {
-                gdk_beep();
+                gdk_display_beep(gdk_display_get_default());
                 pos = gtk_editable_get_position(GTK_EDITABLE(widget));
                 gtk_editable_delete_text(GTK_EDITABLE(widget), pos, pos + 1);
             }
@@ -460,7 +460,7 @@ static gint compare_func(GtkTreeModel * model,
  *
  * @param view Pointer to the GtkTreeView object.
  * @param path The path of the row that was activated.
- * @param column The column where the activation occured.
+ * @param column The column where the activation occurred.
  * @param data Pointer to the GtkSatselector widget.
  *
  * This function is called when the user double clicks on a satellite in the

@@ -73,6 +73,7 @@ const gchar    *SAT_LIST_COL_TITLE[SAT_LIST_COL_NUMBER] = {
     N_("Orbit"),
     N_("Vis"),
     N_("Decayed"),
+    N_("Status"),
     N_("BOLD")                  /* should never be seen */
 };
 
@@ -105,6 +106,7 @@ const gchar    *SAT_LIST_COL_HINT[SAT_LIST_COL_NUMBER] = {
     N_("Orbit Number"),
     N_("Visibility"),
     N_("Decayed"),
+    N_("Operational Status"),
     N_("---")
 };
 
@@ -134,10 +136,13 @@ const gfloat    SAT_LIST_COL_XALIGN[SAT_LIST_COL_NUMBER] = {
     0.0,                        // phase
     1.0,                        // orbit
     0.5,                        // visibility
+    0.0,                        // Operational Status
 };
 
-static void     gtk_sat_list_class_init(GtkSatListClass * class);
-static void     gtk_sat_list_init(GtkSatList * list);
+static void     gtk_sat_list_class_init(GtkSatListClass * class,
+					gpointer class_data);
+static void     gtk_sat_list_init(GtkSatList * list,
+				  gpointer g_class);
 static void     gtk_sat_list_destroy(GtkWidget * widget);
 static GtkTreeModel *create_and_fill_model(GHashTable * sats);
 static void     sat_list_add_satellites(gpointer key, gpointer value,
@@ -184,10 +189,19 @@ static void     two_dec_cell_data_function(GtkTreeViewColumn * col,
                                            GtkTreeIter * iter,
                                            gpointer column);
 
+
+static void     operational_status_cell_data_function(GtkTreeViewColumn * col,
+                                           GtkCellRenderer * renderer,
+                                           GtkTreeModel * model,
+                                           GtkTreeIter * iter,
+                                           gpointer column);
+
+
 static void     event_cell_data_function(GtkTreeViewColumn * col,
                                          GtkCellRenderer * renderer,
                                          GtkTreeModel * model,
                                          GtkTreeIter * iter, gpointer column);
+
 
 static gint     event_cell_compare_function(GtkTreeModel * model,
                                             GtkTreeIter * a, GtkTreeIter * b,
@@ -234,17 +248,23 @@ GType gtk_sat_list_get_type()
     return gtk_sat_list_type;
 }
 
-static void gtk_sat_list_class_init(GtkSatListClass * class)
+static void gtk_sat_list_class_init(GtkSatListClass * class,
+				    gpointer class_data)
 {
     GtkWidgetClass *widget_class = (GtkWidgetClass *) class;
+
+    (void)class_data;
+
     widget_class->destroy = gtk_sat_list_destroy;
 
     parent_class = g_type_class_peek_parent(class);
 }
 
-static void gtk_sat_list_init(GtkSatList * list)
+static void gtk_sat_list_init(GtkSatList * list,
+			      gpointer g_class)
 {
     (void)list;
+    (void)g_class;
 }
 
 static void gtk_sat_list_destroy(GtkWidget * widget)
@@ -297,13 +317,13 @@ GtkWidget      *gtk_sat_list_new(GKeyFile * cfgdata, GHashTable * sats,
         }
     }
     if (g_key_file_has_key(satlist->cfgdata,
-                           MOD_CFG_EVENT_LIST_SECTION,
-                           MOD_CFG_EVENT_LIST_SORT_ORDER, NULL))
+                           MOD_CFG_LIST_SECTION,
+                           MOD_CFG_LIST_SORT_ORDER, NULL))
     {
         satlist->sort_order =
             g_key_file_get_integer(satlist->cfgdata,
-                                   MOD_CFG_EVENT_LIST_SECTION,
-                                   MOD_CFG_EVENT_LIST_SORT_ORDER, NULL);
+                                   MOD_CFG_LIST_SECTION,
+                                   MOD_CFG_LIST_SORT_ORDER, NULL);
         if ((satlist->sort_order > 1) || (satlist->sort_order < 0))
             satlist->sort_order = GTK_SORT_ASCENDING;
 
@@ -440,6 +460,7 @@ static GtkTreeModel *create_and_fill_model(GHashTable * sats)
                                    G_TYPE_LONG, // orbit
                                    G_TYPE_STRING,       // visibility
                                    G_TYPE_BOOLEAN,      // decay
+                                   G_TYPE_INT,       // Operational Status
                                    G_TYPE_INT   // weight/bold
         );
 
@@ -485,8 +506,9 @@ static void sat_list_add_satellites(gpointer key, gpointer value,
                        SAT_LIST_COL_DELAY, 0.0,
                        SAT_LIST_COL_MA, sat->ma,
                        SAT_LIST_COL_PHASE, sat->phase,
-                       SAT_LIST_COL_ORBIT, sat->orbit, SAT_LIST_COL_DECAY,
-                       !decayed(sat), -1);
+                       SAT_LIST_COL_ORBIT, sat->orbit, 
+                       SAT_LIST_COL_STAT_OPERATIONAL, (char *) sat->tle.status,
+                       SAT_LIST_COL_DECAY, !decayed(sat), -1);
 }
 
 /** Update satellites */
@@ -732,13 +754,13 @@ static gboolean sat_list_update_sats(GtkTreeModel * model, GtkTreePath * path,
             {
                 /* next event is LOS */
                 number = sat->los;
-                alstr = g_strdup("LOS: ");
+                alstr = g_strdup(" (LOS)");
             }
             else
             {
                 /* next event is AOS */
                 number = sat->aos;
-                alstr = g_strdup("AOS: ");
+                alstr = g_strdup(" (AOS)");
             }
 
             if (number == 0.0)
@@ -751,7 +773,7 @@ static gboolean sat_list_update_sats(GtkTreeModel * model, GtkTreePath * path,
 
                 /* format the number */
                 tfstr = sat_cfg_get_str(SAT_CFG_STR_TIME_FORMAT);
-                fmtstr = g_strconcat(alstr, tfstr, NULL);
+                fmtstr = g_strconcat(tfstr, alstr, NULL);
                 g_free(tfstr);
 
                 daynum_to_str(buff, TIME_FORMAT_MAX_LENGTH, fmtstr, number);
@@ -856,20 +878,77 @@ static void check_and_set_cell_renderer(GtkTreeViewColumn * column,
                                                 event_cell_data_function,
                                                 GUINT_TO_POINTER(i), NULL);
         break;
+    
+    case SAT_LIST_COL_STAT_OPERATIONAL:
+        gtk_tree_view_column_set_cell_data_func(column,
+                                                renderer,
+                                                operational_status_cell_data_function,
+                                                GUINT_TO_POINTER(i), NULL);
+        break;
+    
 
     default:
         break;
     }
 }
 
-/* Render column containg lat/lon
+/* Render column containing the operational status */
+static void     operational_status_cell_data_function(GtkTreeViewColumn * col,
+                                           GtkCellRenderer * renderer,
+                                           GtkTreeModel * model,
+                                           GtkTreeIter * iter,
+                                           gpointer column)
+{
+    gint            number;
+    guint           coli = GPOINTER_TO_UINT(column);
+
+    (void)col;                  /* avoid unusued parameter compiler warning */
+
+    gtk_tree_model_get(model, iter, coli, &number, -1);
+
+    switch (number)
+    {
+
+    case OP_STAT_OPERATIONAL:
+        g_object_set(renderer, "text", "Operational", NULL);
+        break;
+
+    case OP_STAT_NONOP:
+        g_object_set(renderer, "text", "Non-operational", NULL);
+        break;
+
+    case OP_STAT_PARTIAL:
+        g_object_set(renderer, "text", "Partially operational", NULL);
+        break;
+
+    case OP_STAT_STDBY:
+        g_object_set(renderer, "text", "Backup/Standby", NULL);
+        break;
+
+    case OP_STAT_SPARE:
+        g_object_set(renderer, "text", "Spare", NULL);
+        break;
+
+    case OP_STAT_EXTENDED:
+        g_object_set(renderer, "text", "Extended Mission", NULL);
+        break;
+
+    default:
+        g_object_set(renderer, "text", "Unknown", NULL);
+        break;
+
+    }
+
+}
+
+/* Render column containing lat/lon
    by using this instead of the default data function, we can
    control the number of decimals and display the coordinates in a
    fancy way, including degree sign and NWSE suffixes.
 
    Please note that this function only affects how the numbers are
    displayed (rendered), the tree_store will still contain the
-   original flaoting point numbers. Very cool!
+   original floating point numbers. Very cool!
 */
 static void latlon_cell_data_function(GtkTreeViewColumn * col,
                                       GtkCellRenderer * renderer,

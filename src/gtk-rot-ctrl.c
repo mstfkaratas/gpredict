@@ -43,6 +43,7 @@
 #endif
 
 #include <errno.h>
+#include <glib.h>
 #include <glib/gi18n.h>
 #include <gtk/gtk.h>
 #include <math.h>
@@ -720,7 +721,6 @@ static void track_toggle_cb(GtkToggleButton * button, gpointer data)
     gtk_widget_set_sensitive(ctrl->ElSet, !ctrl->tracking);
 }
 
-
 /**
  * Rotator controller timeout function
  *
@@ -740,6 +740,8 @@ static gboolean rot_ctrl_timeout_cb(gpointer data)
     gdouble         time_delta;
     gdouble         step_size;
 
+#define SAFE_AZI(azi) CLAMP(azi, ctrl->conf->minaz, ctrl->conf->maxaz)
+#define SAFE_ELE(ele) CLAMP(ele, ctrl->conf->minel, ctrl->conf->maxel)
 
     /* If we are tracking and the target satellite is within
        range, set the rotor position controller knob values to
@@ -755,20 +757,20 @@ static gboolean rot_ctrl_timeout_cb(gpointer data)
             {
                 if (ctrl->t < ctrl->pass->aos)
                 {
-                    setaz = ctrl->pass->aos_az;
-                    setel = 0;
+                    setaz = SAFE_AZI(ctrl->pass->aos_az);
+                    setel = SAFE_ELE(0.0);
                 }
                 else if (ctrl->t > ctrl->pass->los)
                 {
-                    setaz = ctrl->pass->los_az;
-                    setel = 0;
+                    setaz = SAFE_AZI(ctrl->pass->los_az);
+                    setel = SAFE_ELE(0.0);
                 }
             }
         }
         else
         {
-            setaz = ctrl->target->az;
-            setel = ctrl->target->el;
+            setaz = SAFE_AZI(ctrl->target->az);
+            setel = SAFE_ELE(ctrl->target->el);
         }
         /* if this is a flipped pass and the rotor supports it */
         if ((ctrl->flipped) && (ctrl->conf->maxel >= 180.0))
@@ -798,6 +800,7 @@ static gboolean rot_ctrl_timeout_cb(gpointer data)
     }
     else
     {
+        /* the control ranges have already been limited by conf */
         setaz = gtk_rot_knob_get_value(GTK_ROT_KNOB(ctrl->AzSet));
         setel = gtk_rot_knob_get_value(GTK_ROT_KNOB(ctrl->ElSet));
     }
@@ -811,6 +814,12 @@ static gboolean rot_ctrl_timeout_cb(gpointer data)
             rotaz = ctrl->client.azi_in;
             rotel = ctrl->client.ele_in;
             g_mutex_unlock(&ctrl->client.mutex);
+
+            /* ensure Azimuth angle is 0-360 degrees */
+            while (rotaz < 0.0)
+                rotaz += 360.0;
+            while (rotaz > 360.0)
+                rotaz -= 360.0;
 
             if (error)
             {
@@ -843,8 +852,8 @@ static gboolean rot_ctrl_timeout_cb(gpointer data)
         }
 
         /* if tolerance exceeded */
-        if ((fabs(setaz - rotaz) > ctrl->tolerance) ||
-            (fabs(setel - rotel) > ctrl->tolerance))
+        if ((fabs(setaz - rotaz) > ctrl->threshold) ||
+            (fabs(setel - rotel) > ctrl->threshold))
         {
             if (ctrl->tracking)
             {
@@ -906,8 +915,8 @@ static gboolean rot_ctrl_timeout_cb(gpointer data)
                             sat->az = sat->az - 360.0;
                         }
                         if ((sat->el < 0.0) || (sat->el > 180.0) ||
-                            (fabs(setaz - sat->az) > (ctrl->tolerance)) ||
-                            (fabs(setel - sat->el) > (ctrl->tolerance)))
+                            (fabs(setaz - sat->az) > (ctrl->threshold)) ||
+                            (fabs(setel - sat->el) > (ctrl->threshold)))
                         {
                             time_delta -= step_size;
                         }
@@ -917,14 +926,8 @@ static gboolean rot_ctrl_timeout_cb(gpointer data)
                         }
                         step_size /= 2.0;
                     }
-                    setel = sat->el;
-                    if (setel < 0.0)
-                        setel = 0.0;
-
-                    if (setel > 180.0)
-                        setel = 180.0;
-
-                    setaz = sat->az;
+                    setel = SAFE_ELE(sat->el);
+                    setaz = SAFE_AZI(sat->az);
                 }
             }
 
@@ -1023,6 +1026,8 @@ static void delay_changed_cb(GtkSpinButton * spin, gpointer data)
     GtkRotCtrl     *ctrl = GTK_ROT_CTRL(data);
 
     ctrl->delay = (guint) gtk_spin_button_get_value(spin);
+    if (ctrl->conf)
+        ctrl->conf->cycle = ctrl->delay;
 
     if (ctrl->timerid > 0)
         g_source_remove(ctrl->timerid);
@@ -1031,7 +1036,7 @@ static void delay_changed_cb(GtkSpinButton * spin, gpointer data)
 }
 
 /**
- * Manage tolerance changes.
+ * Manage threshold changes
  *
  * \param spin Pointer to the spin button.
  * \param data Pointer to the GtkRotCtrl widget.
@@ -1039,11 +1044,13 @@ static void delay_changed_cb(GtkSpinButton * spin, gpointer data)
  * This function is called when the user changes the value of the
  * tolerance.
  */
-static void toler_changed_cb(GtkSpinButton * spin, gpointer data)
+static void threshold_changed_cb(GtkSpinButton * spin, gpointer data)
 {
     GtkRotCtrl     *ctrl = GTK_ROT_CTRL(data);
 
-    ctrl->tolerance = gtk_spin_button_get_value(spin);
+    ctrl->threshold = gtk_spin_button_get_value(spin);
+    if (ctrl->conf)
+        ctrl->conf->threshold = ctrl->threshold;
 }
 
 /**
@@ -1084,6 +1091,11 @@ static void rot_selected_cb(GtkComboBox * box, gpointer data)
         sat_log_log(SAT_LOG_LEVEL_INFO,
                     _("Loaded new rotator configuration %s"),
                     ctrl->conf->name);
+
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(ctrl->cycle_spin),
+                                  ctrl->conf->cycle);
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(ctrl->thld_spin),
+                                  ctrl->conf->threshold);
 
         /* update new ranges of the Az and El controller widgets */
         gtk_rot_knob_set_range(GTK_ROT_KNOB(ctrl->AzSet), ctrl->conf->minaz,
@@ -1319,7 +1331,7 @@ static GtkWidget *create_target_widgets(GtkRotCtrl * ctrl)
 
 static GtkWidget *create_conf_widgets(GtkRotCtrl * ctrl)
 {
-    GtkWidget      *frame, *table, *label, *timer, *toler;
+    GtkWidget      *frame, *table, *label;
     GDir           *dir = NULL; /* directory handle */
     GError         *error = NULL;       /* error flag and info */
     gchar          *dirname;    /* directory name */
@@ -1408,43 +1420,40 @@ static GtkWidget *create_conf_widgets(GtkRotCtrl * ctrl)
                      G_CALLBACK(rot_monitor_cb), ctrl);
     gtk_grid_attach(GTK_GRID(table), ctrl->MonitorCheckBox, 1, 1, 1, 1);
 
-    /* Timeout */
+    /* cycle period */
     label = gtk_label_new(_("Cycle:"));
     g_object_set(label, "xalign", 1.0f, "yalign", 0.5f, NULL);
     gtk_grid_attach(GTK_GRID(table), label, 0, 2, 1, 1);
 
-    timer = gtk_spin_button_new_with_range(1000, 10000, 10);
-    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(timer), 0);
-    gtk_widget_set_tooltip_text(timer,
+    ctrl->cycle_spin = gtk_spin_button_new_with_range(10, 10000, 10);
+    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(ctrl->cycle_spin), 0);
+    gtk_widget_set_tooltip_text(ctrl->cycle_spin,
                                 _("This parameter controls the delay between "
                                   "commands sent to the rotator."));
-    gtk_spin_button_set_value(GTK_SPIN_BUTTON(timer), ctrl->delay);
-    g_signal_connect(timer, "value-changed", G_CALLBACK(delay_changed_cb),
-                     ctrl);
-    gtk_grid_attach(GTK_GRID(table), timer, 1, 2, 1, 1);
+    g_signal_connect(ctrl->cycle_spin, "value-changed",
+                     G_CALLBACK(delay_changed_cb), ctrl);
+    gtk_grid_attach(GTK_GRID(table), ctrl->cycle_spin, 1, 2, 1, 1);
 
     label = gtk_label_new(_("msec"));
     g_object_set(label, "xalign", 0.0f, "yalign", 0.5f, NULL);
     gtk_grid_attach(GTK_GRID(table), label, 2, 2, 1, 1);
 
     /* Tolerance */
-    label = gtk_label_new(_("Tolerance:"));
+    label = gtk_label_new(_("Threshold:"));
     g_object_set(label, "xalign", 1.0f, "yalign", 0.5f, NULL);
     gtk_grid_attach(GTK_GRID(table), label, 0, 3, 1, 1);
 
-    toler = gtk_spin_button_new_with_range(0.01, 50.0, 0.01);
-    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(toler), 2);
-    gtk_widget_set_tooltip_text(toler,
-                                _("This parameter controls the tolerance "
-                                  "between the target and rotator values for "
-                                  "the rotator.\n"
+    ctrl->thld_spin = gtk_spin_button_new_with_range(0.01, 50.0, 0.01);
+    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(ctrl->thld_spin), 2);
+    gtk_widget_set_tooltip_text(ctrl->thld_spin,
+                                _("This parameter sets the threshold that triggers "
+                                  "new motion command to the rotator.\n"
                                   "If the difference between the target and "
                                   "rotator values is smaller than the "
-                                  "tolerance, no new commands are sent"));
-    gtk_spin_button_set_value(GTK_SPIN_BUTTON(toler), ctrl->tolerance);
-    g_signal_connect(toler, "value-changed", G_CALLBACK(toler_changed_cb),
-                     ctrl);
-    gtk_grid_attach(GTK_GRID(table), toler, 1, 3, 1, 1);
+                                  "threshold, no new commands are sent"));
+    g_signal_connect(ctrl->thld_spin, "value-changed",
+                     G_CALLBACK(threshold_changed_cb), ctrl);
+    gtk_grid_attach(GTK_GRID(table), ctrl->thld_spin, 1, 3, 1, 1);
 
     label = gtk_label_new(_("deg"));
     g_object_set(label, "xalign", 0.0f, "yalign", 0.5f, NULL);
@@ -1524,8 +1533,11 @@ static gboolean have_conf()
     return (i > 0) ? TRUE : FALSE;
 }
 
-static void gtk_rot_ctrl_init(GtkRotCtrl * ctrl)
+static void gtk_rot_ctrl_init(GtkRotCtrl * ctrl,
+			      gpointer g_class)
 {
+    (void)g_class;
+
     ctrl->sats = NULL;
     ctrl->target = NULL;
     ctrl->pass = NULL;
@@ -1536,7 +1548,7 @@ static void gtk_rot_ctrl_init(GtkRotCtrl * ctrl)
     ctrl->engaged = FALSE;
     ctrl->delay = 1000;
     ctrl->timerid = 0;
-    ctrl->tolerance = 5.0;
+    ctrl->threshold = 5.0;
     ctrl->errcnt = 0;
 
     g_mutex_init(&ctrl->client.mutex);
@@ -1550,12 +1562,15 @@ static void gtk_rot_ctrl_destroy(GtkWidget * widget)
     GtkRotCtrl     *ctrl = GTK_ROT_CTRL(widget);
 
     /* stop timer */
-    if (ctrl->timerid > 0)
+    if (ctrl->timerid > 0) {
         g_source_remove(ctrl->timerid);
+        ctrl->timerid = 0;
+    }
 
     /* free configuration */
     if (ctrl->conf != NULL)
     {
+        rotor_conf_save(ctrl->conf);
         g_free(ctrl->conf->name);
         g_free(ctrl->conf->host);
         g_free(ctrl->conf);
@@ -1574,9 +1589,12 @@ static void gtk_rot_ctrl_destroy(GtkWidget * widget)
     (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-static void gtk_rot_ctrl_class_init(GtkRotCtrlClass * class)
+static void gtk_rot_ctrl_class_init(GtkRotCtrlClass * class,
+				    gpointer class_data)
 {
     GtkWidgetClass *widget_class = (GtkWidgetClass *) class;
+
+    (void)class_data;
 
     widget_class->destroy = gtk_rot_ctrl_destroy;
     parent_class = g_type_class_peek_parent(class);
@@ -1664,9 +1682,6 @@ GtkWidget      *gtk_rot_ctrl_new(GtkSatModule * module)
                        TRUE, TRUE, 5);
     gtk_box_pack_start(GTK_BOX(rot_ctrl), table, FALSE, FALSE, 5);
     gtk_container_set_border_width(GTK_CONTAINER(rot_ctrl), 5);
-
-    rot_ctrl->timerid = g_timeout_add(rot_ctrl->delay,
-                                      rot_ctrl_timeout_cb, rot_ctrl);
 
     if (module->target > 0)
         gtk_rot_ctrl_select_sat(rot_ctrl, module->target);
